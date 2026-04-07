@@ -42,20 +42,22 @@ fun MainScreen(serviceManager: ServiceManager) {
     val scope = rememberCoroutineScope()
     var editingService by remember { mutableStateOf<ServiceItem?>(null) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
-    var probeResult by remember { mutableStateOf<String?>(null) }
+    var probeContent by remember { mutableStateOf<String?>(null) }
+    var lastCommand by remember { mutableStateOf<String?>(null) }
 
     Column(modifier = Modifier.padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Service Control", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.White)
             Spacer(modifier = Modifier.weight(1f))
             Button(onClick = {
-                val error = serviceManager.triggerDiscoveryScan()
-                if (error != null) {
-                    statusMessage = "Scan fel: $error"
+                val result = serviceManager.triggerDiscoveryScan()
+                lastCommand = result.command
+                if (result.error != null) {
+                    statusMessage = "Scan fel: ${result.error}"
                 } else {
-                    statusMessage = "Scan skickad, väntar på resultat..."
+                    statusMessage = "Scan skickad..."
                     scope.launch {
-                        kotlinx.coroutines.delay(2000)
+                        kotlinx.coroutines.delay(3000)
                         services = serviceManager.syncDiscoveredScripts()
                         statusMessage = "Hittade ${services.size} tjänster"
                     }
@@ -65,16 +67,16 @@ fun MainScreen(serviceManager: ServiceManager) {
             }
             Spacer(modifier = Modifier.width(8.dp))
             Button(onClick = {
-                val error = serviceManager.runProbe()
-                if (error != null) {
-                    probeResult = "Probe fel: $error"
+                val result = serviceManager.runProbe()
+                lastCommand = result.command
+                probeContent = null
+                if (result.error != null) {
+                    probeContent = "FEL: ${result.error}"
                 } else {
                     scope.launch {
-                        kotlinx.coroutines.delay(2000)
-                        probeResult = if (serviceManager.probeFileExists())
-                            "Probe OK — Termux svarar"
-                        else
-                            "Probe MISSLYCKADES — filen skapades inte (men inget exception)"
+                        kotlinx.coroutines.delay(3000)
+                        val content = serviceManager.probeFileContent()
+                        probeContent = content ?: "Filen skapades INTE i Downloads"
                     }
                 }
             }) {
@@ -92,13 +94,17 @@ fun MainScreen(serviceManager: ServiceManager) {
             }
         }
 
-        if (statusMessage != null) {
+        if (lastCommand != null) {
             Spacer(modifier = Modifier.height(6.dp))
+            Text("CMD: $lastCommand", color = Color(0xFF666666), fontSize = 10.sp)
+        }
+        if (statusMessage != null) {
+            Spacer(modifier = Modifier.height(4.dp))
             Text(statusMessage!!, color = Color(0xFFFF9800), fontSize = 12.sp)
         }
-        if (probeResult != null) {
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(probeResult!!, color = Color(0xFF00E5FF), fontSize = 12.sp)
+        if (probeContent != null) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text("Probe output:\n$probeContent", color = Color(0xFF00E5FF), fontSize = 11.sp)
         }
 
         Spacer(modifier = Modifier.height(16.dp))
