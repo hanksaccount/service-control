@@ -63,15 +63,11 @@ fun MainScreen(serviceManager: ServiceManager) {
             }
             Spacer(modifier = Modifier.width(8.dp))
             Button(onClick = {
-                val newService = com.litman.servicecontrol.model.ServiceItem(
+                editingService = com.litman.servicecontrol.model.ServiceItem(
                     id = System.currentTimeMillis().toString(),
                     name = "Ny tjänst",
                     scriptPath = ""
                 )
-                val newList = services + newService
-                serviceManager.saveServices(newList)
-                services = newList
-                editingService = newService
             }) {
                 Text("+")
             }
@@ -108,7 +104,10 @@ fun MainScreen(serviceManager: ServiceManager) {
             service = editingService!!,
             onDismiss = { editingService = null },
             onSave = { updated ->
-                val newList = services.map { if (it.id == updated.id) updated else it }
+                val newList = if (services.any { it.id == updated.id })
+                    services.map { if (it.id == updated.id) updated else it }
+                else
+                    services + updated
                 serviceManager.saveServices(newList)
                 services = newList
                 editingService = null
