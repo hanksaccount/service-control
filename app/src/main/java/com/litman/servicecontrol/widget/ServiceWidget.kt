@@ -1,20 +1,17 @@
 package com.litman.servicecontrol.widget
 
 import android.content.Context
-import android.os.VibrationEffect
-import android.os.Vibrator
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.glance.*
 import androidx.glance.action.ActionParameters
-import androidx.glance.action.actionParametersOf
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.cornerRadius
 import androidx.glance.appwidget.provideContent
-import androidx.glance.background
 import androidx.glance.layout.*
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
@@ -33,7 +30,9 @@ class ServiceWidget : GlanceAppWidget() {
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val manager = ServiceManager(context)
-        val services = manager.getSavedServices().filter { it.isEnabledOnWidget }
+        val allServices = manager.getSavedServices().filter { it.isEnabledOnWidget }
+        // Visa max 3 tjänster för att hålla det enkelt och stabilt
+        val services = allServices.take(3)
 
         val runtimes: Map<String, ServiceRuntime> = services.associate { s ->
             s.id to (s.port?.let { manager.checkStatusWithLoad(it) } ?: ServiceRuntime.NO_PORT)
@@ -44,17 +43,17 @@ class ServiceWidget : GlanceAppWidget() {
         val sysColor   = systemLoadColor(sysLoad)
 
         provideContent {
-            WidgetRoot(context, services, runtimes, activeCount, sysLoad, sysColor)
+            WidgetRoot(services, runtimes, activeCount, allServices.size, sysLoad, sysColor)
         }
     }
 }
 
 @Composable
 private fun WidgetRoot(
-    context: Context,
     services: List<ServiceItem>,
     runtimes: Map<String, ServiceRuntime>,
     activeCount: Int,
+    totalCount: Int,
     sysLoad: String,
     sysColor: Int
 ) {
@@ -83,7 +82,7 @@ private fun WidgetRoot(
                     StatusDot(color = Color(sysColor), size = 6.dp)
                     Spacer(GlanceModifier.width(4.dp))
                     Text(
-                        text = "System: $sysLoad  ·  $activeCount/${services.size} aktiva",
+                        text = "System: $sysLoad  ·  $activeCount/$totalCount aktiva",
                         style = TextStyle(
                             color = ColorProvider(Color(sysColor)),
                             fontSize = 11.sp,
@@ -92,34 +91,26 @@ private fun WidgetRoot(
                     )
                 }
             }
-            // Refresh-knapp
+            // Enkel Refresh-knapp
             Text(
                 text = "↺",
                 modifier = GlanceModifier
                     .clickable(actionRunCallback<RefreshAction>())
                     .padding(4.dp),
-                style = TextStyle(color = ColorProvider(Color(0xFF444444)), fontSize = 16.sp)
+                style = TextStyle(color = ColorProvider(Color(0xFF888888)), fontSize = 16.sp)
             )
         }
 
-        Spacer(GlanceModifier.height(6.dp))
-
-        // Separator
-        Box(
-            modifier = GlanceModifier
-                .fillMaxWidth()
-                .height(1.dp)
-                .background(Color(0xFF1E1E1E))
-        ) {}
-
-        Spacer(GlanceModifier.height(6.dp))
+        Spacer(GlanceModifier.height(8.dp))
 
         // ── Tjänster ────────────────────────────────────────────
         if (services.isEmpty()) {
-            Text(
-                text = "Inga tjänster markerade för widget",
-                style = TextStyle(color = ColorProvider(Color(0xFF555555)), fontSize = 11.sp)
-            )
+            Box(modifier = GlanceModifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    text = "Inga tjänster i widgeten",
+                    style = TextStyle(color = ColorProvider(Color(0xFF555555)), fontSize = 11.sp)
+                )
+            }
         } else {
             services.forEach { service ->
                 val runtime = runtimes[service.id] ?: ServiceRuntime.UNKNOWN
@@ -132,23 +123,21 @@ private fun WidgetRoot(
 
 @Composable
 private fun ServiceRow(service: ServiceItem, runtime: ServiceRuntime) {
-    val dotColor  = Color(statusDotColor(runtime))
-    val label     = statusLabel(runtime)
-    val isRunning = runtime.status == RunStatus.RUNNING
+    val dotColorInt = statusDotColor(runtime)
+    val dotColor = Color(dotColorInt)
+    val label = statusLabel(runtime)
 
     Row(
         modifier = GlanceModifier
             .fillMaxWidth()
-            .background(Color(0xFF141414))
+            .background(Color(0xFF1A1A1A))
             .cornerRadius(8.dp)
-            .padding(horizontal = 8.dp, vertical = 5.dp),
+            .padding(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Status-prick
         StatusDot(color = dotColor, size = 8.dp)
-        Spacer(GlanceModifier.width(6.dp))
+        Spacer(GlanceModifier.width(8.dp))
 
-        // Namn + status-text
         Column(modifier = GlanceModifier.defaultWeight()) {
             Text(
                 text = service.label,
@@ -162,37 +151,6 @@ private fun ServiceRow(service: ServiceItem, runtime: ServiceRuntime) {
                 text = if (service.port != null) "$label · :${service.port}" else label,
                 style = TextStyle(color = ColorProvider(dotColor), fontSize = 10.sp)
             )
-        }
-
-        // START / STOPP — bara om port är konfigurerad
-        if (service.port != null) {
-            Spacer(GlanceModifier.width(6.dp))
-            val btnText  = if (isRunning) "STOPP" else "STARTA"
-            val btnColor = if (isRunning) Color(0xFF3A1A1A) else Color(0xFF1A3A1A)
-            val btnTxtColor = if (isRunning) Color(0xFFFF4444) else Color(0xFF00FF88)
-
-            Box(
-                modifier = GlanceModifier
-                    .background(btnColor)
-                    .cornerRadius(6.dp)
-                    .clickable(
-                        actionRunCallback<ToggleAction>(
-                            actionParametersOf(
-                                ActionParameters.Key<String>("service_id")   to service.id,
-                                ActionParameters.Key<Boolean>("is_active")   to isRunning,
-                                ActionParameters.Key<String>("script_path")  to service.scriptPath,
-                                ActionParameters.Key<Int>("port")            to service.port
-                            )
-                        )
-                    )
-                    .padding(horizontal = 8.dp, vertical = 3.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = btnText,
-                    style = TextStyle(color = ColorProvider(btnTxtColor), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                )
-            }
         }
     }
 }
@@ -208,29 +166,8 @@ private fun StatusDot(color: Color, size: androidx.compose.ui.unit.Dp) {
     ) {}
 }
 
-// ── Actions ──────────────────────────────────────────────────────────────────
-
 class RefreshAction : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
-        ServiceWidget().update(context, glanceId)
-    }
-}
-
-class ToggleAction : ActionCallback {
-    override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
-        val isActive   = parameters[ActionParameters.Key<Boolean>("is_active")]  ?: false
-        val scriptPath = parameters[ActionParameters.Key<String>("script_path")] ?: ""
-        val port       = parameters[ActionParameters.Key<Int>("port")]           ?: 0
-        val manager    = ServiceManager(context)
-
-        @Suppress("DEPRECATION")
-        val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
-        vibrator.vibrate(VibrationEffect.createOneShot(40, VibrationEffect.DEFAULT_AMPLITUDE))
-
-        if (isActive) manager.stopService(port)
-        else          manager.runTermuxScript(scriptPath)
-
-        kotlinx.coroutines.delay(1200)
         ServiceWidget().update(context, glanceId)
     }
 }
