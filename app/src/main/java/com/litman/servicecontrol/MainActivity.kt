@@ -1,6 +1,10 @@
 package com.litman.servicecontrol
 
+import android.app.PendingIntent
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -21,11 +25,11 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.litman.servicecontrol.model.ServiceItem
 import com.litman.servicecontrol.model.ServiceManager
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 private const val TERMUX_PERMISSION = "com.termux.permission.RUN_COMMAND"
+private const val ACTION_PROBE  = "com.litman.servicecontrol.PROBE_RESULT"
+private const val ACTION_SCAN   = "com.litman.servicecontrol.SCAN_RESULT"
 
 class MainActivity : ComponentActivity() {
     private lateinit var serviceManager: ServiceManager
@@ -33,7 +37,6 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         serviceManager = ServiceManager(this)
-
         setContent {
             ServiceControlTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFF121212)) {
@@ -44,40 +47,84 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+fun makePendingIntent(context: android.content.Context, action: String, requestCode: Int): PendingIntent {
+    val intent = Intent(action).apply { setPackage(context.packageName) }
+    val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+    else
+        PendingIntent.FLAG_UPDATE_CURRENT
+    return PendingIntent.getBroadcast(context, requestCode, intent, flags)
+}
+
 @Composable
 fun MainScreen(serviceManager: ServiceManager) {
     val context = LocalContext.current
-    var services by remember { mutableStateOf(serviceManager.getSavedServices()) }
     val scope = rememberCoroutineScope()
+    var services by remember { mutableStateOf(serviceManager.getSavedServices()) }
     var editingService by remember { mutableStateOf<ServiceItem?>(null) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var probeContent by remember { mutableStateOf<String?>(null) }
     var lastCommand by remember { mutableStateOf<String?>(null) }
 
-    // Permission state — räknas om vid rekomposition
     var permissionGranted by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(context, TERMUX_PERMISSION) == PackageManager.PERMISSION_GRANTED
         )
     }
-
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         permissionGranted = granted
-        if (!granted) {
-            statusMessage = "Android beviljade inte permission via dialog. Prova ADB:\nadb shell pm grant ${context.packageName} $TERMUX_PERMISSION"
-        }
+        if (!granted) statusMessage = "Android beviljade inte permission.\nKör i Termux:\npm grant ${context.packageName} $TERMUX_PERMISSION"
     }
 
-    // Package-info
     val pkgInfo = remember {
-        try { context.packageManager.getPackageInfo(context.packageName, 0) } catch (e: Exception) { null }
+        try { context.packageManager.getPackageInfo(context.packageName, 0) } catch (_: Exception) { null }
+    }
+
+    // Registrera BroadcastReceivers för probe- och scan-resultat
+    DisposableEffect(Unit) {
+        val probeReceiver = TermuxResultReceiver { stdout, stderr, exitCode ->
+            serviceManager.debugLog("probe result: exit=$exitCode stdout=[$stdout] stderr=[$stderr]")
+            probeContent = if (stdout.isNotBlank()) stdout
+                           else if (stderr.isNotBlank()) "stderr: $stderr"
+                           else "(tom output, exit=$exitCode)"
+        }
+        val scanReceiver = TermuxResultReceiver { stdout, stderr, exitCode ->
+            serviceManager.debugLog("scan result: exit=$exitCode stdout=[$stdout] stderr=[$stderr]")
+            if (stdout.isBlank() && stderr.isNotBlank()) {
+                statusMessage = "Scan stderr: $stderr"
+            } else {
+                try {
+                    val parsed = serviceManager.parseScanResult(stdout)
+                    services = parsed
+                    statusMessage = "Hittade ${parsed.size} tjänster\nstdout: $stdout"
+                } catch (e: Exception) {
+                    statusMessage = "Parse krasch: ${e.javaClass.simpleName}: ${e.message}"
+                }
+            }
+        }
+
+        val probeFilter = IntentFilter(ACTION_PROBE)
+        val scanFilter  = IntentFilter(ACTION_SCAN)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.registerReceiver(probeReceiver, probeFilter, android.content.Context.RECEIVER_NOT_EXPORTED)
+            context.registerReceiver(scanReceiver,  scanFilter,  android.content.Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            context.registerReceiver(probeReceiver, probeFilter)
+            context.registerReceiver(scanReceiver,  scanFilter)
+        }
+
+        onDispose {
+            context.unregisterReceiver(probeReceiver)
+            context.unregisterReceiver(scanReceiver)
+        }
     }
 
     LazyColumn(modifier = Modifier.padding(16.dp)) {
 
-        // ── Debug-panel ─────────────────────────────────────────
+        // ── Debug-panel ──────────────────────────────────────────
         item {
             Card(
                 colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A2E)),
@@ -85,43 +132,31 @@ fun MainScreen(serviceManager: ServiceManager) {
             ) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("DEBUG", fontSize = 10.sp, color = Color(0xFF666666), fontWeight = FontWeight.Bold)
-
-                    // Package info
                     Text(
                         "pkg: ${context.packageName}  v${pkgInfo?.versionName} (${pkgInfo?.versionCode})",
                         fontSize = 10.sp, color = Color(0xFF888888)
                     )
-
-                    // Permission-status
                     val permColor = if (permissionGranted) Color(0xFF00FF88) else Color(0xFFFF4444)
-                    val permText = if (permissionGranted) "RUN_COMMAND: GRANTED" else "RUN_COMMAND: NOT GRANTED"
-                    Text(permText, fontSize = 11.sp, color = permColor, fontWeight = FontWeight.Bold)
-
+                    Text(
+                        if (permissionGranted) "RUN_COMMAND: GRANTED" else "RUN_COMMAND: NOT GRANTED",
+                        fontSize = 11.sp, color = permColor, fontWeight = FontWeight.Bold
+                    )
                     if (!permissionGranted) {
-                        Spacer(modifier = Modifier.height(4.dp))
                         Button(
                             onClick = { permissionLauncher.launch(TERMUX_PERMISSION) },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF4444))
-                        ) {
-                            Text("Begär permission", fontSize = 12.sp)
-                        }
+                        ) { Text("Begär permission", fontSize = 12.sp) }
                         Text(
-                            "Om ingen dialog visas, kör i Termux:\nadb shell pm grant ${context.packageName} $TERMUX_PERMISSION",
-                            fontSize = 10.sp,
-                            color = Color(0xFFFF9800)
+                            "Om ingen dialog: kör i Termux:\npm grant ${context.packageName} $TERMUX_PERMISSION",
+                            fontSize = 10.sp, color = Color(0xFFFF9800)
                         )
                     }
-
-                    if (lastCommand != null) {
-                        Spacer(modifier = Modifier.height(4.dp))
+                    if (lastCommand != null)
                         Text("CMD: $lastCommand", fontSize = 9.sp, color = Color(0xFF555555))
-                    }
-                    if (statusMessage != null) {
+                    if (statusMessage != null)
                         Text(statusMessage!!, fontSize = 11.sp, color = Color(0xFFFF9800))
-                    }
-                    if (probeContent != null) {
+                    if (probeContent != null)
                         Text("Probe:\n$probeContent", fontSize = 10.sp, color = Color(0xFF00E5FF))
-                    }
                 }
             }
             Spacer(modifier = Modifier.height(12.dp))
@@ -132,64 +167,28 @@ fun MainScreen(serviceManager: ServiceManager) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Service Control", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White)
                 Spacer(modifier = Modifier.weight(1f))
-                Button(
-                    onClick = {
-                        permissionGranted = ContextCompat.checkSelfPermission(context, TERMUX_PERMISSION) == PackageManager.PERMISSION_GRANTED
-                        if (!permissionGranted) { statusMessage = "Permission saknas"; return@Button }
-                        serviceManager.clearDebugLog()
-                        val result = serviceManager.triggerDiscoveryScan()
-                        lastCommand = result.command
-                        if (result.error != null) { statusMessage = "startService fel: ${result.error}"; return@Button }
-                        statusMessage = "Scan skickad, väntar 4s..."
-                        scope.launch {
-                            try {
-                                serviceManager.debugLog("scan: delay start")
-                                withContext(Dispatchers.IO) { Thread.sleep(4000) }
-                                serviceManager.debugLog("scan: läser fil")
-                                val raw = withContext(Dispatchers.IO) { serviceManager.readScanFileRaw() }
-                                serviceManager.debugLog("scan: rå=[$raw]")
-                                statusMessage = "Rå scanfil:\n$raw"
-                                serviceManager.debugLog("scan: parse start")
-                                val parsed = withContext(Dispatchers.IO) { serviceManager.parseScanContent(raw) }
-                                serviceManager.debugLog("scan: klar ${parsed.size} tjänster")
-                                services = parsed
-                                statusMessage = "Hittade ${parsed.size} tjänster\nRå:\n$raw"
-                            } catch (e: Exception) {
-                                val msg = "${e.javaClass.simpleName}: ${e.message}\n${e.stackTraceToString().take(500)}"
-                                serviceManager.debugLog("scan KRASCH: $msg")
-                                statusMessage = "KRASCH:\n$msg"
-                            }
-                        }
-                    }
-                ) { Text("Scan") }
+
+                Button(onClick = {
+                    permissionGranted = ContextCompat.checkSelfPermission(context, TERMUX_PERMISSION) == PackageManager.PERMISSION_GRANTED
+                    if (!permissionGranted) { statusMessage = "Permission saknas"; return@Button }
+                    serviceManager.clearDebugLog()
+                    val pi = makePendingIntent(context, ACTION_SCAN, 2)
+                    val result = serviceManager.triggerDiscoveryScan(pi)
+                    lastCommand = result.command
+                    statusMessage = if (result.error != null) "FEL: ${result.error}" else "Scan skickad, väntar på svar..."
+                }) { Text("Scan") }
 
                 Spacer(modifier = Modifier.width(8.dp))
 
-                Button(
-                    onClick = {
-                        permissionGranted = ContextCompat.checkSelfPermission(context, TERMUX_PERMISSION) == PackageManager.PERMISSION_GRANTED
-                        if (!permissionGranted) { probeContent = "Permission saknas"; return@Button }
-                        serviceManager.clearDebugLog()
-                        val result = serviceManager.runProbe()
-                        lastCommand = result.command
-                        if (result.error != null) { probeContent = "startService fel: ${result.error}"; return@Button }
-                        probeContent = "Skickad, väntar 4s..."
-                        scope.launch {
-                            try {
-                                serviceManager.debugLog("probe: delay start")
-                                withContext(Dispatchers.IO) { Thread.sleep(4000) }
-                                serviceManager.debugLog("probe: läser fil")
-                                val raw = withContext(Dispatchers.IO) { serviceManager.readProbeFileRaw() }
-                                serviceManager.debugLog("probe: OK ${raw.length} tecken")
-                                probeContent = raw
-                            } catch (e: Exception) {
-                                val msg = "${e.javaClass.simpleName}: ${e.message}\n${e.stackTraceToString().take(500)}"
-                                serviceManager.debugLog("probe KRASCH: $msg")
-                                probeContent = "KRASCH:\n$msg"
-                            }
-                        }
-                    }
-                ) { Text("Probe") }
+                Button(onClick = {
+                    permissionGranted = ContextCompat.checkSelfPermission(context, TERMUX_PERMISSION) == PackageManager.PERMISSION_GRANTED
+                    if (!permissionGranted) { probeContent = "Permission saknas"; return@Button }
+                    serviceManager.clearDebugLog()
+                    val pi = makePendingIntent(context, ACTION_PROBE, 1)
+                    val result = serviceManager.runProbe(pi)
+                    lastCommand = result.command
+                    probeContent = if (result.error != null) "FEL: ${result.error}" else "Skickad, väntar på svar..."
+                }) { Text("Probe") }
 
                 Spacer(modifier = Modifier.width(8.dp))
 
@@ -255,14 +254,8 @@ fun ServiceCard(service: ServiceItem, onEdit: () -> Unit) {
                     fontSize = 12.sp
                 )
             }
-            Switch(
-                checked = service.isEnabledOnWidget,
-                onCheckedChange = null,
-                enabled = service.port != null
-            )
-            IconButton(onClick = onEdit) {
-                Text("⚙️")
-            }
+            Switch(checked = service.isEnabledOnWidget, onCheckedChange = null, enabled = service.port != null)
+            IconButton(onClick = onEdit) { Text("⚙️") }
         }
     }
 }
@@ -293,9 +286,7 @@ fun ConfigDialog(service: ServiceItem, onDismiss: () -> Unit, onSave: (ServiceIt
                 onSave(service.copy(port = port.toIntOrNull(), icon = icon, isEnabledOnWidget = enabled))
             }) { Text("Spara") }
         },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Avbryt") }
-        }
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Avbryt") } }
     )
 }
 
