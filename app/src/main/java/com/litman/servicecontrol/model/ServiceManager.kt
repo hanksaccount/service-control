@@ -11,6 +11,9 @@ import io.ktor.client.*
 import io.ktor.client.engine.android.*
 import io.ktor.client.request.*
 import kotlinx.coroutines.withTimeoutOrNull
+import com.litman.servicecontrol.model.LoadLevel
+import com.litman.servicecontrol.model.RunStatus
+import com.litman.servicecontrol.model.ServiceRuntime
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -88,14 +91,33 @@ class ServiceManager(private val context: Context) {
         return current
     }
 
-    suspend fun checkStatus(port: Int): Boolean {
+    suspend fun checkStatus(port: Int): Boolean =
+        checkStatusWithLoad(port).status == RunStatus.RUNNING
+
+    suspend fun checkStatusWithLoad(port: Int): ServiceRuntime {
         return try {
-            val response = withTimeoutOrNull(1000) {
+            val t0 = System.currentTimeMillis()
+            val response = withTimeoutOrNull(2000) {
                 client.get("http://127.0.0.1:$port")
             }
-            response?.status?.value == 200 || response?.status?.value == 404
+            val ms = System.currentTimeMillis() - t0
+            if (response == null) {
+                ServiceRuntime(RunStatus.STOPPED, LoadLevel.UNKNOWN, null)
+            } else {
+                val ok = response.status.value in 200..499
+                val load = when {
+                    ms < 300  -> LoadLevel.LOW
+                    ms < 700  -> LoadLevel.MEDIUM
+                    else      -> LoadLevel.HIGH
+                }
+                ServiceRuntime(
+                    status = if (ok) RunStatus.RUNNING else RunStatus.STOPPED,
+                    load   = if (ok) load else LoadLevel.UNKNOWN,
+                    responseMs = ms
+                )
+            }
         } catch (e: Exception) {
-            false
+            ServiceRuntime(RunStatus.UNKNOWN, LoadLevel.UNKNOWN, null)
         }
     }
 
