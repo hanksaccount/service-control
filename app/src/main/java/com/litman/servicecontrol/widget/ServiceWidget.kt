@@ -151,7 +151,7 @@ private fun ServiceRow(service: ServiceItem, runtime: ServiceRuntime) {
         // Namn + status-text
         Column(modifier = GlanceModifier.defaultWeight()) {
             Text(
-                text = service.name,
+                text = service.label,
                 style = TextStyle(
                     color = ColorProvider(Color.White),
                     fontSize = 13.sp,

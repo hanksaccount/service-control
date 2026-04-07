@@ -20,11 +20,14 @@ import java.util.*
 data class ServiceItem(
     val id: String,
     val name: String,
+    val displayName: String = "",
     var port: Int? = null,
     var icon: String = "📄",
     val scriptPath: String,
     var isEnabledOnWidget: Boolean = false
-)
+) {
+    val label: String get() = if (displayName.isNotBlank()) displayName else name
+}
 
 data class TermuxResult(val command: String, val error: String? = null)
 
