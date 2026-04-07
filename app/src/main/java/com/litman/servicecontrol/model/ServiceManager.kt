@@ -11,6 +11,8 @@ import io.ktor.client.engine.android.*
 import io.ktor.client.request.*
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.*
 
 data class ServiceItem(
     val id: String,
@@ -21,7 +23,6 @@ data class ServiceItem(
     var isEnabledOnWidget: Boolean = false
 )
 
-// Returneras från probe/scan så UI kan visa exakt kommando + eventuellt fel
 data class TermuxResult(val command: String, val error: String? = null)
 
 class ServiceManager(private val context: Context) {
@@ -34,9 +35,22 @@ class ServiceManager(private val context: Context) {
         }
     }
 
-    // Publik plats som både Termux och appen kan nå
     private val downloadsDir: File
         get() = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+
+    private val debugLogFile: File
+        get() = File(downloadsDir, "service_control_debug.txt")
+
+    fun debugLog(msg: String) {
+        try {
+            val ts = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault()).format(Date())
+            debugLogFile.appendText("[$ts] $msg\n")
+        } catch (_: Exception) {}
+    }
+
+    fun clearDebugLog() {
+        try { debugLogFile.writeText("=== debug log ===\n") } catch (_: Exception) {}
+    }
 
     fun getSavedServices(): List<ServiceItem> {
         val json = prefs.getString("services_list", "[]")
@@ -49,56 +63,56 @@ class ServiceManager(private val context: Context) {
         prefs.edit().putString("services_list", json).apply()
     }
 
-    // Probe: steg-för-steg debug — visar hur långt Termux-kommandot faktiskt når
     fun runProbe(): TermuxResult {
-        val probeFile = "${downloadsDir.absolutePath}/service_control_probe.txt"
-        val command = buildString {
-            append("echo 'steg1: start' > \"$probeFile\"; ")
-            append("echo 'steg2: shortcuts finns:' >> \"$probeFile\"; ")
-            append("ls /data/data/com.termux/files/home/.shortcuts/ >> \"$probeFile\" 2>&1; ")
-            append("echo 'steg3: klar' >> \"$probeFile\"")
-        }
+        val probeFile = File(downloadsDir, "service_control_probe.txt").absolutePath
+        val command = "echo 'steg1:start' > \"$probeFile\" && " +
+            "ls /data/data/com.termux/files/home/.shortcuts/ >> \"$probeFile\" 2>&1 && " +
+            "echo 'steg3:klar' >> \"$probeFile\""
         return startTermuxCommand(command)
     }
 
-    fun probeFileContent(): String? {
+    // Returnerar rå filinnehåll eller kastar — låter anroparen hantera exception
+    fun readProbeFileRaw(): String {
         val file = File(downloadsDir, "service_control_probe.txt")
-        return if (file.exists()) file.readText() else null
+        debugLog("probe: exists=${file.exists()} path=${file.absolutePath}")
+        if (!file.exists()) return "(filen finns inte)"
+        val content = file.readText()
+        debugLog("probe: read ${content.length} bytes")
+        return content.ifBlank { "(filen är tom)" }
     }
 
-    // Scan: listar .sh-filer i .shortcuts och skriver till Downloads
     fun triggerDiscoveryScan(): TermuxResult {
-        val scanFile = "${downloadsDir.absolutePath}/discovered_scripts.txt"
-        val command = buildString {
-            append("echo 'scan start' > \"$scanFile\"; ")
-            append("ls /data/data/com.termux/files/home/.shortcuts/*.sh >> \"$scanFile\" 2>&1; ")
-            append("echo 'scan klar' >> \"$scanFile\"")
-        }
+        val scanFile = File(downloadsDir, "discovered_scripts.txt").absolutePath
+        val command = "ls /data/data/com.termux/files/home/.shortcuts/*.sh > \"$scanFile\" 2>&1"
         return startTermuxCommand(command)
     }
 
-    fun syncDiscoveredScripts(): List<ServiceItem> {
-        val scanFile = File(downloadsDir, "discovered_scripts.txt")
-        if (!scanFile.exists()) return getSavedServices()
+    // Returnerar rå filinnehåll — anroparen hanterar exception
+    fun readScanFileRaw(): String {
+        val file = File(downloadsDir, "discovered_scripts.txt")
+        debugLog("scan: exists=${file.exists()} path=${file.absolutePath}")
+        if (!file.exists()) return "(scanfil finns inte)"
+        val content = file.readText()
+        debugLog("scan: read ${content.length} bytes, content=[$content]")
+        return content.ifBlank { "(scanfil är tom)" }
+    }
 
-        val lines = scanFile.readLines()
-            .filter { it.isNotBlank() && !it.startsWith("scan") }
-            .filter { it.endsWith(".sh") }
-
-        val currentServices = getSavedServices().toMutableList()
+    fun parseScanContent(raw: String): List<ServiceItem> {
+        debugLog("parse: start, input=[$raw]")
+        val lines = raw.lines().filter { it.trim().endsWith(".sh") }
+        debugLog("parse: ${lines.size} rader matchar .sh")
+        val current = getSavedServices().toMutableList()
         lines.forEach { path ->
             val trimmed = path.trim()
-            if (currentServices.none { it.scriptPath == trimmed }) {
+            if (current.none { it.scriptPath == trimmed }) {
                 val name = trimmed.substringAfterLast("/").removeSuffix(".sh")
-                currentServices.add(ServiceItem(
-                    id = trimmed.hashCode().toString(),
-                    name = name,
-                    scriptPath = trimmed
-                ))
+                current.add(ServiceItem(id = trimmed.hashCode().toString(), name = name, scriptPath = trimmed))
+                debugLog("parse: lade till '$name'")
             }
         }
-        saveServices(currentServices)
-        return currentServices
+        saveServices(current)
+        debugLog("parse: klar, ${current.size} tjänster totalt")
+        return current
     }
 
     suspend fun checkStatus(port: Int): Boolean {
@@ -140,10 +154,6 @@ class ServiceManager(private val context: Context) {
         intent.putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash")
         intent.putExtra("com.termux.RUN_COMMAND_ARGUMENTS", args)
         intent.putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
-        try {
-            context.startService(intent)
-        } catch (e: Exception) {
-            // Termux ej tillgängligt
-        }
+        try { context.startService(intent) } catch (_: Exception) {}
     }
 }

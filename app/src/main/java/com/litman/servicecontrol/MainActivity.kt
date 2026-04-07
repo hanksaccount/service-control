@@ -21,7 +21,9 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.litman.servicecontrol.model.ServiceItem
 import com.litman.servicecontrol.model.ServiceManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private const val TERMUX_PERMISSION = "com.termux.permission.RUN_COMMAND"
 
@@ -132,22 +134,30 @@ fun MainScreen(serviceManager: ServiceManager) {
                 Spacer(modifier = Modifier.weight(1f))
                 Button(
                     onClick = {
-                        // Uppdatera permission-state direkt vid klick
                         permissionGranted = ContextCompat.checkSelfPermission(context, TERMUX_PERMISSION) == PackageManager.PERMISSION_GRANTED
-                        if (!permissionGranted) {
-                            statusMessage = "Permission saknas — se debug-panelen ovan"
-                            return@Button
-                        }
+                        if (!permissionGranted) { statusMessage = "Permission saknas"; return@Button }
+                        serviceManager.clearDebugLog()
                         val result = serviceManager.triggerDiscoveryScan()
                         lastCommand = result.command
-                        if (result.error != null) {
-                            statusMessage = "Scan fel: ${result.error}"
-                        } else {
-                            statusMessage = "Scan skickad..."
-                            scope.launch {
-                                kotlinx.coroutines.delay(3000)
-                                services = serviceManager.syncDiscoveredScripts()
-                                statusMessage = "Hittade ${services.size} tjänster"
+                        if (result.error != null) { statusMessage = "startService fel: ${result.error}"; return@Button }
+                        statusMessage = "Scan skickad, väntar 4s..."
+                        scope.launch {
+                            try {
+                                serviceManager.debugLog("scan: delay start")
+                                withContext(Dispatchers.IO) { Thread.sleep(4000) }
+                                serviceManager.debugLog("scan: läser fil")
+                                val raw = withContext(Dispatchers.IO) { serviceManager.readScanFileRaw() }
+                                serviceManager.debugLog("scan: rå=[$raw]")
+                                statusMessage = "Rå scanfil:\n$raw"
+                                serviceManager.debugLog("scan: parse start")
+                                val parsed = withContext(Dispatchers.IO) { serviceManager.parseScanContent(raw) }
+                                serviceManager.debugLog("scan: klar ${parsed.size} tjänster")
+                                services = parsed
+                                statusMessage = "Hittade ${parsed.size} tjänster\nRå:\n$raw"
+                            } catch (e: Exception) {
+                                val msg = "${e.javaClass.simpleName}: ${e.message}\n${e.stackTraceToString().take(500)}"
+                                serviceManager.debugLog("scan KRASCH: $msg")
+                                statusMessage = "KRASCH:\n$msg"
                             }
                         }
                     }
@@ -158,20 +168,24 @@ fun MainScreen(serviceManager: ServiceManager) {
                 Button(
                     onClick = {
                         permissionGranted = ContextCompat.checkSelfPermission(context, TERMUX_PERMISSION) == PackageManager.PERMISSION_GRANTED
-                        if (!permissionGranted) {
-                            probeContent = "Permission saknas"
-                            return@Button
-                        }
+                        if (!permissionGranted) { probeContent = "Permission saknas"; return@Button }
+                        serviceManager.clearDebugLog()
                         val result = serviceManager.runProbe()
                         lastCommand = result.command
-                        probeContent = "Väntar..."
-                        if (result.error != null) {
-                            probeContent = "FEL: ${result.error}"
-                        } else {
-                            scope.launch {
-                                kotlinx.coroutines.delay(3000)
-                                probeContent = serviceManager.probeFileContent()
-                                    ?: "Filen skapades INTE i Downloads"
+                        if (result.error != null) { probeContent = "startService fel: ${result.error}"; return@Button }
+                        probeContent = "Skickad, väntar 4s..."
+                        scope.launch {
+                            try {
+                                serviceManager.debugLog("probe: delay start")
+                                withContext(Dispatchers.IO) { Thread.sleep(4000) }
+                                serviceManager.debugLog("probe: läser fil")
+                                val raw = withContext(Dispatchers.IO) { serviceManager.readProbeFileRaw() }
+                                serviceManager.debugLog("probe: OK ${raw.length} tecken")
+                                probeContent = raw
+                            } catch (e: Exception) {
+                                val msg = "${e.javaClass.simpleName}: ${e.message}\n${e.stackTraceToString().take(500)}"
+                                serviceManager.debugLog("probe KRASCH: $msg")
+                                probeContent = "KRASCH:\n$msg"
                             }
                         }
                     }
