@@ -57,7 +57,7 @@ class ServiceManager(private val context: Context) {
         intent.putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
 
         return try {
-            context.startService(intent)
+            context.startForegroundService(intent)
             true
         } catch (e: Exception) {
             false
@@ -100,20 +100,26 @@ class ServiceManager(private val context: Context) {
     }
 
     fun runTermuxScript(scriptPath: String) {
-        val intent = Intent("com.termux.instance.execute_script")
-        intent.setClassName("com.termux", "com.termux.app.RunCommandService")
-        intent.putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash")
-        intent.putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf(scriptPath))
-        intent.putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
-        context.startService(intent)
+        sendTermuxCommand("/data/data/com.termux/files/usr/bin/bash", arrayOf(scriptPath))
     }
 
     fun stopService(port: Int) {
-        val intent = Intent("com.termux.instance.execute_script")
+        sendTermuxCommand(
+            "/data/data/com.termux/files/usr/bin/bash",
+            arrayOf("-c", "fuser -k $port/tcp")
+        )
+    }
+
+    private fun sendTermuxCommand(path: String, args: Array<String>) {
+        val intent = Intent("com.termux.RUN_COMMAND")
         intent.setClassName("com.termux", "com.termux.app.RunCommandService")
-        intent.putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/fuser")
-        intent.putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf("-k", "$port/tcp"))
+        intent.putExtra("com.termux.RUN_COMMAND_PATH", path)
+        intent.putExtra("com.termux.RUN_COMMAND_ARGUMENTS", args)
         intent.putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
-        context.startService(intent)
+        try {
+            context.startForegroundService(intent)
+        } catch (e: Exception) {
+            // Termux ej tillgängligt eller permission saknas
+        }
     }
 }
