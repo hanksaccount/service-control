@@ -20,30 +20,23 @@ import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
-import com.litman.servicecontrol.model.RunStatus
-import com.litman.servicecontrol.model.ServiceItem
-import com.litman.servicecontrol.model.ServiceManager
-import com.litman.servicecontrol.model.ServiceRuntime
-import com.litman.servicecontrol.model.statusDotColor
-import com.litman.servicecontrol.model.statusLabel
-import com.litman.servicecontrol.model.systemLoad
-import com.litman.servicecontrol.model.systemLoadColor
+import com.litman.servicecontrol.model.*
 
 class ServiceWidget : GlanceAppWidget() {
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val manager = ServiceManager(context)
         val allSaved = manager.getSavedServices()
-        val allWidgetEnabled = allSaved.filter { it.isEnabledOnWidget }
+        val panels = allSaved.filter { it.group == ServiceGroup.PANELS || it.group == ServiceGroup.UNKNOWN }
+        val allWidgetEnabled = panels.filter { it.isEnabledOnWidget && (it.type == ServiceType.WEB_PANEL || it.type == ServiceType.HYBRID) }
         
-        // Max 3 tjänster för widget stabilitet
         val servicesToShow = allWidgetEnabled.take(3)
 
         val runtimes: Map<String, ServiceRuntime> = servicesToShow.associate { s ->
-            s.id to manager.checkStatusWithLoad(s.port)
+            s.id to manager.checkStatusWithLoad(s)
         }
 
-        val activeCount = runtimes.values.count { it.status == RunStatus.RUNNING }
+        val activeCount = runtimes.values.count { it.status == RunStatus.RUNNING || it.status == RunStatus.ACTIVE }
         val sysLoad    = systemLoad(runtimes.values)
         val sysColorInt = systemLoadColor(sysLoad)
 
@@ -52,7 +45,7 @@ class ServiceWidget : GlanceAppWidget() {
                 services = servicesToShow,
                 runtimes = runtimes,
                 activeCount = activeCount,
-                totalCount = allSaved.size,
+                totalCount = panels.size,
                 sysLoad = sysLoad,
                 sysColor = sysColorInt
             )
@@ -72,10 +65,9 @@ private fun WidgetRoot(
     Column(
         modifier = GlanceModifier
             .fillMaxSize()
-            .background(ColorProvider(Color(0xFF0D0D0D)))
-            .padding(8.dp)
+            .background(ColorProvider(Color(0xFF0A0A0A)))
+            .padding(10.dp)
     ) {
-        // --- Header ---
         Row(
             modifier = GlanceModifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
@@ -84,13 +76,13 @@ private fun WidgetRoot(
                 Text(
                     text = "SERVICE CONTROL",
                     style = TextStyle(
-                        color = ColorProvider(Color(0xFF00E5FF)),
-                        fontSize = 10.sp,
+                        color = ColorProvider(Color(0xFFBBBBBB)),
+                        fontSize = 9.sp,
                         fontWeight = FontWeight.Bold
                     )
                 )
                 Text(
-                    text = "System: " + sysLoad + "  ·  " + activeCount + "/" + totalCount + " aktiva",
+                    text = "$sysLoad · $activeCount/$totalCount aktiva",
                     style = TextStyle(
                         color = ColorProvider(Color(sysColor)),
                         fontSize = 11.sp,
@@ -99,14 +91,13 @@ private fun WidgetRoot(
                 )
             }
             
-            // Refresh
             Text(
                 text = "↺",
                 modifier = GlanceModifier
                     .padding(4.dp)
-                    .clickable(actionRunCallback<RefreshAction>()),
+                    .clickable(actionRunCallback<RefreshActionWidget>()),
                 style = TextStyle(
-                    color = ColorProvider(Color(0xFF888888)),
+                    color = ColorProvider(Color(0xFF444444)),
                     fontSize = 18.sp
                 )
             )
@@ -114,7 +105,6 @@ private fun WidgetRoot(
 
         Spacer(GlanceModifier.height(8.dp))
 
-        // --- Services ---
         if (services.isEmpty()) {
             Box(
                 modifier = GlanceModifier.fillMaxSize(),
@@ -122,13 +112,13 @@ private fun WidgetRoot(
             ) {
                 Text(
                     text = "Inga tjänster i widgeten",
-                    style = TextStyle(color = ColorProvider(Color(0xFF555555)), fontSize = 11.sp)
+                    style = TextStyle(color = ColorProvider(Color(0xFF333333)), fontSize = 11.sp)
                 )
             }
         } else {
             services.forEach { service ->
                 val runtime = runtimes[service.id] ?: ServiceRuntime.UNKNOWN
-                ServiceRow(service, runtime)
+                ServiceWidgetRow(service, runtime)
                 Spacer(GlanceModifier.height(4.dp))
             }
         }
@@ -136,7 +126,7 @@ private fun WidgetRoot(
 }
 
 @Composable
-private fun ServiceRow(service: ServiceItem, runtime: ServiceRuntime) {
+private fun ServiceWidgetRow(service: ServiceItem, runtime: ServiceRuntime) {
     val dotColorInt = statusDotColor(runtime)
     val label = statusLabel(runtime)
     val name = service.label
@@ -144,17 +134,16 @@ private fun ServiceRow(service: ServiceItem, runtime: ServiceRuntime) {
     Row(
         modifier = GlanceModifier
             .fillMaxWidth()
-            .background(ColorProvider(Color(0xFF1A1A1A)))
-            .cornerRadius(8.dp)
-            .padding(8.dp),
+            .background(ColorProvider(Color(0xFF151515)))
+            .cornerRadius(4.dp)
+            .padding(6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Enkel fyrkant som status-indikator istället för custom dot
         Box(
             modifier = GlanceModifier
-                .size(8.dp)
+                .size(6.dp)
                 .background(ColorProvider(Color(dotColorInt)))
-                .cornerRadius(4.dp)
+                .cornerRadius(3.dp)
         ) {}
         
         Spacer(GlanceModifier.width(8.dp))
@@ -165,22 +154,23 @@ private fun ServiceRow(service: ServiceItem, runtime: ServiceRuntime) {
                 style = TextStyle(
                     color = ColorProvider(Color.White),
                     fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            )
-            val info = if (service.port != null) label + " · :" + service.port else label
-            Text(
-                text = info,
-                style = TextStyle(
-                    color = ColorProvider(Color(dotColorInt)),
-                    fontSize = 10.sp
+                    fontWeight = FontWeight.Medium
                 )
             )
         }
+
+        val info = if (service.port != null) "$label · :${service.port}" else label
+        Text(
+            text = info,
+            style = TextStyle(
+                color = ColorProvider(Color(0xFF888888)),
+                fontSize = 10.sp
+            )
+        )
     }
 }
 
-class RefreshAction : ActionCallback {
+class RefreshActionWidget : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
         ServiceWidget().update(context, glanceId)
     }

@@ -4,29 +4,60 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
-import android.os.Build
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import io.ktor.client.*
 import io.ktor.client.engine.android.*
 import io.ktor.client.request.*
+import io.ktor.client.statement.*
 import kotlinx.coroutines.withTimeoutOrNull
-import com.litman.servicecontrol.model.LoadLevel
-import com.litman.servicecontrol.model.RunStatus
-import com.litman.servicecontrol.model.ServiceRuntime
 import java.text.SimpleDateFormat
 import java.util.*
 
 data class ServiceItem(
     val id: String,
     val name: String,
-    val displayName: String = "",
+    var displayName: String = "",
     var port: Int? = null,
     var icon: String = "📄",
     val scriptPath: String,
-    var isEnabledOnWidget: Boolean = false
+    var isEnabledOnWidget: Boolean = false,
+    var type: ServiceType = ServiceType.UNKNOWN,
+    var impactProfile: ImpactLevel = ImpactLevel.IDLE,
+    var group: ServiceGroup = ServiceGroup.UNKNOWN,
+    var canOpen: Boolean = false,
+    var openUrl: String? = null,
+    var canStart: Boolean = true,
+    var canStop: Boolean = true
 ) {
     val label: String get() = if (displayName.isNotBlank()) displayName else name
+}
+
+data class ServiceTemplate(
+    val name: String,
+    val displayName: String,
+    val type: ServiceType,
+    val defaultPort: Int? = null,
+    val impact: ImpactLevel,
+    val group: ServiceGroup,
+    val showInWidget: Boolean = false,
+    val canOpen: Boolean = false,
+    val openUrl: String? = null,
+    val canStart: Boolean = true,
+    val canStop: Boolean = true
+)
+
+object TemplateRegistry {
+    private val templates = listOf(
+        ServiceTemplate("autosort", "AutoSort", ServiceType.WEB_PANEL, 5300, ImpactLevel.MEDIUM, ServiceGroup.PANELS, true, true, "http://127.0.0.1:5300"),
+        ServiceTemplate("dashboard", "Dashboard", ServiceType.HYBRID, null, ImpactLevel.MEDIUM, ServiceGroup.PANELS, true, true),
+        ServiceTemplate("elpris", "Elpris", ServiceType.HYBRID, 5100, ImpactLevel.LOW, ServiceGroup.PANELS, true, true, "http://127.0.0.1:5100"),
+        ServiceTemplate("fuel", "Fuel", ServiceType.WEB_PANEL, null, ImpactLevel.MEDIUM, ServiceGroup.PANELS, false, true),
+        ServiceTemplate("runfull", "Kör alla", ServiceType.ACTION_SCRIPT, null, ImpactLevel.BURST, ServiceGroup.ACTIONS, false, false, canStop = false),
+        ServiceTemplate("stopall", "Stoppa alla", ServiceType.ACTION_SCRIPT, null, ImpactLevel.BURST, ServiceGroup.ACTIONS, false, false, canStop = false)
+    )
+
+    fun find(name: String) = templates.find { it.name == name }
 }
 
 data class TermuxResult(val command: String, val error: String? = null)
@@ -50,10 +81,6 @@ class ServiceManager(private val context: Context) {
         } catch (_: Exception) {}
     }
 
-    fun clearDebugLog() {
-        try { logFile.writeText("=== debug log ===\n") } catch (_: Exception) {}
-    }
-
     fun getSavedServices(): List<ServiceItem> {
         val json = prefs.getString("services_list", "[]")
         val type = object : TypeToken<List<ServiceItem>>() {}.type
@@ -65,40 +92,70 @@ class ServiceManager(private val context: Context) {
         prefs.edit().putString("services_list", json).apply()
     }
 
-    // Probe: listar .shortcuts-mappen, resultatet kommer via pendingIntent
-    fun runProbe(pendingIntent: PendingIntent): TermuxResult {
-        val command = "ls /data/data/com.termux/files/home/.shortcuts/ 2>&1 && echo '__probe_ok__'"
-        return startTermuxCommand(command, pendingIntent)
-    }
-
-    // Scan: listar .sh-filer, resultatet (stdout) kommer via pendingIntent
     fun triggerDiscoveryScan(pendingIntent: PendingIntent): TermuxResult {
         val command = "ls /data/data/com.termux/files/home/.shortcuts/*.sh 2>&1"
         return startTermuxCommand(command, pendingIntent)
     }
 
-    // Parsar stdout från scan-kommandot till ServiceItem-lista
     fun parseScanResult(stdout: String): List<ServiceItem> {
-        debugLog("parse: input=[$stdout]")
         val lines = stdout.lines().map { it.trim() }.filter { it.endsWith(".sh") }
-        debugLog("parse: ${lines.size} .sh-rader")
         val current = getSavedServices().toMutableList()
+
         lines.forEach { path ->
-            if (current.none { it.scriptPath == path }) {
-                val name = path.substringAfterLast("/").removeSuffix(".sh")
-                current.add(ServiceItem(id = path.hashCode().toString(), name = name, scriptPath = path))
-                debugLog("parse: lade till '$name' ($path)")
+            val name = path.substringAfterLast("/").removeSuffix(".sh")
+            val template = TemplateRegistry.find(name)
+            val existingIndex = current.indexOfFirst { it.scriptPath == path }
+
+            if (existingIndex == -1) {
+                val item = if (template != null) {
+                    ServiceItem(
+                        id = path.hashCode().toString(),
+                        name = name,
+                        displayName = template.displayName,
+                        port = template.defaultPort,
+                        scriptPath = path,
+                        isEnabledOnWidget = template.showInWidget,
+                        type = template.type,
+                        impactProfile = template.impact,
+                        group = template.group,
+                        canOpen = template.canOpen,
+                        openUrl = template.openUrl,
+                        canStart = template.canStart,
+                        canStop = template.canStop
+                    )
+                } else {
+                    ServiceItem(id = path.hashCode().toString(), name = name, scriptPath = path)
+                }
+                current.add(item)
+            } else if (template != null && current[existingIndex].type == ServiceType.UNKNOWN) {
+                val existing = current[existingIndex]
+                current[existingIndex] = existing.copy(
+                    displayName = template.displayName,
+                    port = template.defaultPort,
+                    isEnabledOnWidget = template.showInWidget,
+                    type = template.type,
+                    impactProfile = template.impact,
+                    group = template.group,
+                    canOpen = template.canOpen,
+                    openUrl = template.openUrl,
+                    canStart = template.canStart,
+                    canStop = template.canStop
+                )
             }
         }
         saveServices(current)
         return current
     }
 
-    suspend fun checkStatus(port: Int?): Boolean =
-        checkStatusWithLoad(port).status == RunStatus.RUNNING
+    suspend fun checkStatusWithLoad(item: ServiceItem): ServiceRuntime {
+        if (item.type == ServiceType.ACTION_SCRIPT) return ServiceRuntime.UNKNOWN
+        
+        val port = item.port
+        if (port == null) {
+            return if (item.type == ServiceType.NOTIFIER) ServiceRuntime(RunStatus.UNKNOWN, item.impactProfile)
+            else ServiceRuntime.NO_PORT
+        }
 
-    suspend fun checkStatusWithLoad(port: Int?): ServiceRuntime {
-        if (port == null) return ServiceRuntime.NO_PORT
         return try {
             val t0 = System.currentTimeMillis()
             val response = try {
@@ -109,24 +166,19 @@ class ServiceManager(private val context: Context) {
                 null
             }
             val ms = System.currentTimeMillis() - t0
+            
             if (response == null) {
-                ServiceRuntime(RunStatus.STOPPED, LoadLevel.UNKNOWN, null)
+                ServiceRuntime(RunStatus.STOPPED, ImpactLevel.IDLE, null)
             } else {
                 val ok = response.status.value in 200..499
-                val load = when {
-                    ms < 300  -> LoadLevel.LOW
-                    ms < 700  -> LoadLevel.MEDIUM
-                    else      -> LoadLevel.HIGH
-                }
                 ServiceRuntime(
                     status = if (ok) RunStatus.RUNNING else RunStatus.STOPPED,
-                    load   = if (ok) load else LoadLevel.UNKNOWN,
-                    responseMs = ms
+                    impact = if (ok) item.impactProfile else ImpactLevel.IDLE,
+                    responseMs = if (ok) ms else null
                 )
             }
         } catch (e: Exception) {
-            debugLog("checkStatus error: ${e.javaClass.simpleName}: ${e.message}")
-            ServiceRuntime(RunStatus.UNKNOWN, LoadLevel.UNKNOWN, null)
+            ServiceRuntime(RunStatus.UNKNOWN, ImpactLevel.IDLE, null)
         }
     }
 
@@ -147,12 +199,9 @@ class ServiceManager(private val context: Context) {
         intent.putExtra("com.termux.RUN_COMMAND_PENDING_INTENT", pendingIntent)
         return try {
             context.startService(intent)
-            debugLog("startService OK: $command")
             TermuxResult(command)
         } catch (e: Exception) {
-            val err = "${e.javaClass.simpleName}: ${e.message}"
-            debugLog("startService FEL: $err")
-            TermuxResult(command, err)
+            TermuxResult(command, "${e.javaClass.simpleName}: ${e.message}")
         }
     }
 

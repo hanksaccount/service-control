@@ -69,10 +69,8 @@ fun MainScreen(serviceManager: ServiceManager) {
     var editingService by remember { mutableStateOf<ServiceItem?>(null) }
     var detailService by remember { mutableStateOf<ServiceItem?>(null) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
-    var probeContent by remember { mutableStateOf<String?>(null) }
-    var lastCommand by remember { mutableStateOf<String?>(null) }
     var selectedTab by remember { mutableIntStateOf(0) }
-    val tabs = listOf("Alla", "Kör", "Stoppade", "Ej konf.")
+    val tabs = listOf("Alla", "Kör", "Stoppade")
 
     var permissionGranted by remember {
         mutableStateOf(
@@ -86,31 +84,18 @@ fun MainScreen(serviceManager: ServiceManager) {
         if (!granted) statusMessage = "Android beviljade inte permission.\nKör i Termux:\npm grant ${context.packageName} $TERMUX_PERMISSION"
     }
 
-    val pkgInfo = remember {
-        try { context.packageManager.getPackageInfo(context.packageName, 0) } catch (_: Exception) { null }
-    }
-
-    // Status polling
     LaunchedEffect(services) {
         while(true) {
             val newStatuses = services.associate { service ->
-                service.id to serviceManager.checkStatusWithLoad(service.port)
+                service.id to serviceManager.checkStatusWithLoad(service)
             }
             statuses = newStatuses
-            delay(10000) // Poll var 10:e sekund
+            delay(10000)
         }
     }
 
-    // Registrera BroadcastReceivers
     DisposableEffect(Unit) {
-        val probeReceiver = TermuxResultReceiver { stdout, stderr, exitCode ->
-            serviceManager.debugLog("probe result: exit=$exitCode stdout=[$stdout] stderr=[$stderr]")
-            probeContent = if (stdout.isNotBlank()) stdout
-                           else if (stderr.isNotBlank()) "stderr: $stderr"
-                           else "(tom output, exit=$exitCode)"
-        }
         val scanReceiver = TermuxResultReceiver { stdout, stderr, exitCode ->
-            serviceManager.debugLog("scan result: exit=$exitCode stdout=[$stdout] stderr=[$stderr]")
             if (stdout.isBlank() && stderr.isNotBlank()) {
                 statusMessage = "Scan stderr: $stderr"
             } else {
@@ -124,25 +109,16 @@ fun MainScreen(serviceManager: ServiceManager) {
             }
         }
 
-        val probeFilter = IntentFilter(ACTION_PROBE)
         val scanFilter  = IntentFilter(ACTION_SCAN)
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            context.registerReceiver(probeReceiver, probeFilter, android.content.Context.RECEIVER_NOT_EXPORTED)
             context.registerReceiver(scanReceiver,  scanFilter,  android.content.Context.RECEIVER_NOT_EXPORTED)
         } else {
-            context.registerReceiver(probeReceiver, probeFilter)
             context.registerReceiver(scanReceiver,  scanFilter)
         }
-
-        onDispose {
-            context.unregisterReceiver(probeReceiver)
-            context.unregisterReceiver(scanReceiver)
-        }
+        onDispose { context.unregisterReceiver(scanReceiver) }
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // ── Tabs ────────────────────────────────────────────────
         TabRow(
             selectedTabIndex = selectedTab,
             containerColor = Color(0xFF121212),
@@ -159,7 +135,6 @@ fun MainScreen(serviceManager: ServiceManager) {
         }
 
         LazyColumn(modifier = Modifier.padding(16.dp)) {
-            // ── Debug-panel (endast om permission saknas eller fel finns) ─────
             if (!permissionGranted || statusMessage != null) {
                 item {
                     Card(
@@ -180,7 +155,6 @@ fun MainScreen(serviceManager: ServiceManager) {
                 }
             }
 
-            // ── Header ──────────────────────────────────────────────
             item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Service Control", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White)
@@ -190,35 +164,41 @@ fun MainScreen(serviceManager: ServiceManager) {
                         serviceManager.triggerDiscoveryScan(pi)
                         statusMessage = "Scanning..."
                     }) { Text("🔄", fontSize = 20.sp) }
-                    IconButton(onClick = {
-                        editingService = ServiceItem(id = System.currentTimeMillis().toString(), name = "Ny tjänst", scriptPath = "")
-                    }) { Text("➕", fontSize = 20.sp) }
                 }
                 Spacer(modifier = Modifier.height(16.dp))
             }
 
-            // ── Tjänster ─────────────────────────────────────────────
-            val filteredServices = when (selectedTab) {
-                1 -> services.filter { statuses[it.id]?.status == RunStatus.RUNNING }
-                2 -> services.filter { statuses[it.id]?.status == RunStatus.STOPPED }
-                3 -> services.filter { statuses[it.id]?.status == RunStatus.NOT_CONFIGURED }
-                else -> services
+            val panels = services.filter { it.group == ServiceGroup.PANELS || it.group == ServiceGroup.UNKNOWN }
+            val actions = services.filter { it.group == ServiceGroup.ACTIONS }
+
+            val filteredPanels = when (selectedTab) {
+                1 -> panels.filter { statuses[it.id]?.status == RunStatus.RUNNING || statuses[it.id]?.status == RunStatus.ACTIVE }
+                2 -> panels.filter { statuses[it.id]?.status == RunStatus.STOPPED }
+                else -> panels
             }
 
-            if (filteredServices.isEmpty()) {
+            if (filteredPanels.isNotEmpty()) {
                 item {
-                    Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                        Text("Inga tjänster hittades.", color = Color.Gray)
-                    }
+                    Text("PANELER", fontSize = 12.sp, color = Color.Gray, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
                 }
-            } else {
-                items(filteredServices) { service ->
+                items(filteredPanels) { service ->
                     ServiceCard(
                         service = service,
                         runtime = statuses[service.id] ?: ServiceRuntime.UNKNOWN,
                         onEdit = { editingService = service },
                         onClick = { detailService = service }
                     )
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
+            }
+
+            if (actions.isNotEmpty()) {
+                item {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("ACTIONS", fontSize = 12.sp, color = Color.Gray, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
+                }
+                items(actions) { action ->
+                    ActionCard(action = action, onClick = { detailService = action })
                     Spacer(modifier = Modifier.height(12.dp))
                 }
             }
@@ -230,10 +210,7 @@ fun MainScreen(serviceManager: ServiceManager) {
             service = editingService!!,
             onDismiss = { editingService = null },
             onSave = { updated ->
-                val newList = if (services.any { it.id == updated.id })
-                    services.map { if (it.id == updated.id) updated else it }
-                else
-                    services + updated
+                val newList = services.map { if (it.id == updated.id) updated else it }
                 serviceManager.saveServices(newList)
                 services = newList
                 editingService = null
@@ -268,11 +245,7 @@ fun ServiceCard(service: ServiceItem, runtime: ServiceRuntime, onEdit: () -> Uni
                         Surface(shape = RoundedCornerShape(4.dp), color = Color(statusDotColor(runtime)), modifier = Modifier.fillMaxSize()) {}
                     }
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        statusLabel(runtime),
-                        color = if (runtime.status == RunStatus.RUNNING) Color(0xFF00FF88) else Color.Gray,
-                        fontSize = 12.sp
-                    )
+                    Text(statusLabel(runtime), color = Color.Gray, fontSize = 12.sp)
                     if (service.port != null) {
                         Text(" · Port ${service.port}", color = Color.Gray, fontSize = 12.sp)
                     }
@@ -283,24 +256,37 @@ fun ServiceCard(service: ServiceItem, runtime: ServiceRuntime, onEdit: () -> Uni
     }
 }
 
+@Composable
+fun ActionCard(action: ServiceItem, onClick: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable { onClick() },
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF2E2E2E)),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(action.icon, fontSize = 24.sp)
+            Spacer(modifier = Modifier.width(16.dp))
+            Text(action.label, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            Spacer(modifier = Modifier.weight(1f))
+            Text("Kör", color = Color(0xFF00FF88), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ConfigDialog(service: ServiceItem, onDismiss: () -> Unit, onSave: (ServiceItem) -> Unit) {
-    var name by remember { mutableStateOf(service.name) }
     var displayName by remember { mutableStateOf(service.displayName) }
     var port by remember { mutableStateOf(service.port?.toString() ?: "") }
-    var icon by remember { mutableStateOf(service.icon) }
     var enabled by remember { mutableStateOf(service.isEnabledOnWidget) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Konfigurera") },
+        title = { Text("Konfigurera ${service.name}") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                TextField(value = name, onValueChange = { name = it }, label = { Text("Systemnamn") }, readOnly = true)
-                TextField(value = displayName, onValueChange = { displayName = it }, label = { Text("Visningsnamn (Alias)") })
-                TextField(value = port, onValueChange = { port = it }, label = { Text("Port (för statuskontroll)") })
-                TextField(value = icon, onValueChange = { icon = it }, label = { Text("Ikon (Emoji)") })
+                TextField(value = displayName, onValueChange = { displayName = it }, label = { Text("Visningsnamn") })
+                TextField(value = port, onValueChange = { port = it }, label = { Text("Port") })
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Visa på widget")
                     Spacer(modifier = Modifier.weight(1f))
@@ -310,7 +296,7 @@ fun ConfigDialog(service: ServiceItem, onDismiss: () -> Unit, onSave: (ServiceIt
         },
         confirmButton = {
             Button(onClick = {
-                onSave(service.copy(name = name, displayName = displayName, port = port.toIntOrNull(), icon = icon, isEnabledOnWidget = enabled))
+                onSave(service.copy(displayName = displayName, port = port.toIntOrNull(), isEnabledOnWidget = enabled))
             }) { Text("Spara") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Avbryt") } }
@@ -329,71 +315,53 @@ fun DetailBottomSheet(service: ServiceItem, runtime: ServiceRuntime, onDismiss: 
                 Spacer(modifier = Modifier.width(16.dp))
                 Column {
                     Text(service.label, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                    Text(service.scriptPath, fontSize = 12.sp, color = Color.Gray)
+                    Text(service.type.name, fontSize = 11.sp, color = Color.Gray)
                 }
             }
 
             Divider(color = Color.DarkGray)
 
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Column {
-                    Text("STATUS", fontSize = 10.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
-                    Text(statusLabel(runtime), color = Color(statusDotColor(runtime)), fontWeight = FontWeight.Bold)
-                }
-                if (service.port != null) {
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text("PORT", fontSize = 10.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
-                        Text(service.port.toString(), fontWeight = FontWeight.Bold)
+            if (service.type != ServiceType.ACTION_SCRIPT) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Column {
+                        Text("STATUS", fontSize = 10.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
+                        Text(statusLabel(runtime), color = Color(statusDotColor(runtime)), fontWeight = FontWeight.Bold)
+                    }
+                    if (service.port != null) {
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("PORT", fontSize = 10.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
+                            Text(service.port.toString(), fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
 
-            if (runtime.responseMs != null) {
-                Text("Respons: ${runtime.responseMs}ms", fontSize = 11.sp, color = Color.Gray)
-            }
-
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = { serviceManager.runTermuxScript(service.scriptPath) },
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FF88), contentColor = Color.Black)
-                ) { Text("Start") }
-
-                if (service.port != null) {
+                if (service.canStart) {
                     Button(
-                        onClick = {
-                            scope.launch {
-                                serviceManager.stopService(service.port!!)
-                                delay(1000)
-                                serviceManager.runTermuxScript(service.scriptPath)
-                            }
-                        },
+                        onClick = { serviceManager.runTermuxScript(service.scriptPath) },
                         modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E2E2E))
-                    ) { Text("Restart") }
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FF88), contentColor = Color.Black)
+                    ) { Text(if (service.type == ServiceType.ACTION_SCRIPT) "Kör nu" else "Starta") }
+                }
 
+                if (service.canStop && service.port != null) {
                     Button(
                         onClick = { serviceManager.stopService(service.port!!) },
                         modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF4444))
-                    ) { Text("Stopp") }
+                    ) { Text("Stoppa") }
                 }
             }
 
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (service.port != null) {
+            if (service.canOpen) {
+                val url = service.openUrl ?: if (service.port != null) "http://127.0.0.1:${service.port}" else null
+                if (url != null) {
                     OutlinedButton(
-                        onClick = {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("http://127.0.0.1:${service.port}"))
-                            context.startActivity(intent)
-                        },
-                        modifier = Modifier.weight(1f)
-                    ) { Text("Öppna") }
+                        onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("Öppna Panel") }
                 }
-                OutlinedButton(
-                    onClick = { /* Logs placeholder */ },
-                    modifier = Modifier.weight(1f)
-                ) { Text("Loggar") }
             }
         }
     }
