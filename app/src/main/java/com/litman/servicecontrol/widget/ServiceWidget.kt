@@ -28,12 +28,13 @@ import com.litman.servicecontrol.model.ServiceManager
 
 class ServiceWidget : GlanceAppWidget() {
     
-    override suspend fun provideContent(context: Context, id: GlanceId) {
+    override suspend fun provideGlance(context: Context, id: GlanceId) {
         val serviceManager = ServiceManager(context)
-        
-        // Här hämtar vi status för alla tjänster live vid varje uppdatering
-        val statuses = serviceManager.services.associate { 
-            it.id to serviceManager.checkStatus(it.port)
+        val services = serviceManager.getSavedServices()
+
+        // Hämtar status för alla tjänster live vid varje uppdatering
+        val statuses = services.associate { service ->
+            service.id to (service.port?.let { port -> serviceManager.checkStatus(port) } ?: false)
         }
 
         provideContent {
@@ -54,7 +55,7 @@ class ServiceWidget : GlanceAppWidget() {
             Spacer(modifier = GlanceModifier.height(8.dp))
             
             val serviceManager = ServiceManager(context)
-            serviceManager.services.forEach { service ->
+            serviceManager.getSavedServices().forEach { service ->
                 val isActive = statuses[service.id] ?: false
                 ServiceRow(service.name, service.port, service.icon, isActive, service.id, service.scriptPath)
             }
@@ -85,7 +86,7 @@ class ServiceWidget : GlanceAppWidget() {
     }
 
     @Composable
-    private fun ServiceRow(name: String, port: Int, icon: String, isActive: Boolean, id: String, scriptPath: String) {
+    private fun ServiceRow(name: String, port: Int?, icon: String, isActive: Boolean, id: String, scriptPath: String) {
         Row(
             modifier = GlanceModifier
                 .fillMaxWidth()
@@ -103,26 +104,27 @@ class ServiceWidget : GlanceAppWidget() {
                     style = TextStyle(color = ColorProvider(Color.White), fontSize = 14.sp)
                 )
                 Text(
-                    text = "Port $port",
+                    text = if (port != null) "Port $port" else "Ej konfigurerad",
                     style = TextStyle(color = ColorProvider(Color.Gray), fontSize = 10.sp)
                 )
             }
-            
-            StatusIndicator(isActive)
-            Spacer(modifier = GlanceModifier.width(8.dp))
-            
-            Button(
-                text = if (isActive) "STOP" else "START",
-                onClick = actionRunCallback<ToggleAction>(
-                    actionParametersOf(
-                        ActionParameters.Key<String>("service_id") to id,
-                        ActionParameters.Key<Boolean>("is_active") to isActive,
-                        ActionParameters.Key<String>("script_path") to scriptPath,
-                        ActionParameters.Key<Int>("port") to port
-                    )
-                ),
-                modifier = GlanceModifier.height(34.dp)
-            )
+
+            if (port != null) {
+                StatusIndicator(isActive)
+                Spacer(modifier = GlanceModifier.width(8.dp))
+                Button(
+                    text = if (isActive) "STOP" else "START",
+                    onClick = actionRunCallback<ToggleAction>(
+                        actionParametersOf(
+                            ActionParameters.Key<String>("service_id") to id,
+                            ActionParameters.Key<Boolean>("is_active") to isActive,
+                            ActionParameters.Key<String>("script_path") to scriptPath,
+                            ActionParameters.Key<Int>("port") to port
+                        )
+                    ),
+                    modifier = GlanceModifier.height(34.dp)
+                )
+            }
         }
     }
 
