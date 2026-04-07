@@ -94,12 +94,7 @@ fun MainScreen(serviceManager: ServiceManager) {
     LaunchedEffect(services) {
         while(true) {
             val newStatuses = services.associate { service ->
-                val runtime = if (service.port != null) {
-                    serviceManager.checkStatusWithLoad(service.port!!)
-                } else {
-                    ServiceRuntime.NO_PORT
-                }
-                service.id to runtime
+                service.id to serviceManager.checkStatusWithLoad(service.port)
             }
             statuses = newStatuses
             delay(10000) // Poll var 10:e sekund
@@ -206,7 +201,7 @@ fun MainScreen(serviceManager: ServiceManager) {
             val filteredServices = when (selectedTab) {
                 1 -> services.filter { statuses[it.id]?.status == RunStatus.RUNNING }
                 2 -> services.filter { statuses[it.id]?.status == RunStatus.STOPPED }
-                3 -> services.filter { it.port == null }
+                3 -> services.filter { statuses[it.id]?.status == RunStatus.NOT_CONFIGURED }
                 else -> services
             }
 

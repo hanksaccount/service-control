@@ -94,14 +94,19 @@ class ServiceManager(private val context: Context) {
         return current
     }
 
-    suspend fun checkStatus(port: Int): Boolean =
+    suspend fun checkStatus(port: Int?): Boolean =
         checkStatusWithLoad(port).status == RunStatus.RUNNING
 
-    suspend fun checkStatusWithLoad(port: Int): ServiceRuntime {
+    suspend fun checkStatusWithLoad(port: Int?): ServiceRuntime {
+        if (port == null) return ServiceRuntime.NO_PORT
         return try {
             val t0 = System.currentTimeMillis()
-            val response = withTimeoutOrNull(2000) {
-                client.get("http://127.0.0.1:$port")
+            val response = try {
+                withTimeoutOrNull(2000) {
+                    client.get("http://127.0.0.1:$port")
+                }
+            } catch (e: Exception) {
+                null
             }
             val ms = System.currentTimeMillis() - t0
             if (response == null) {
@@ -120,6 +125,7 @@ class ServiceManager(private val context: Context) {
                 )
             }
         } catch (e: Exception) {
+            debugLog("checkStatus error: ${e.javaClass.simpleName}: ${e.message}")
             ServiceRuntime(RunStatus.UNKNOWN, LoadLevel.UNKNOWN, null)
         }
     }

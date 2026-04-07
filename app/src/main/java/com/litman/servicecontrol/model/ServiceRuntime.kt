@@ -1,6 +1,6 @@
 package com.litman.servicecontrol.model
 
-enum class RunStatus { RUNNING, STOPPED, UNKNOWN }
+enum class RunStatus { RUNNING, STOPPED, NOT_CONFIGURED, UNKNOWN }
 
 // Belastningsnivå baserad på HTTP-svarstid — utbyggbar med CPU/RAM senare
 enum class LoadLevel {
@@ -17,7 +17,7 @@ data class ServiceRuntime(
 ) {
     companion object {
         val UNKNOWN = ServiceRuntime(RunStatus.UNKNOWN, LoadLevel.UNKNOWN, null)
-        val NO_PORT = ServiceRuntime(RunStatus.UNKNOWN, LoadLevel.UNKNOWN, null)
+        val NO_PORT = ServiceRuntime(RunStatus.NOT_CONFIGURED, LoadLevel.UNKNOWN, null)
     }
 }
 
@@ -43,6 +43,7 @@ fun statusDotColor(runtime: ServiceRuntime): Int = when {
     runtime.status == RunStatus.RUNNING && runtime.load == LoadLevel.MEDIUM -> 0xFFFFD166.toInt()
     runtime.status == RunStatus.RUNNING && runtime.load == LoadLevel.HIGH   -> 0xFFFF6B35.toInt()
     runtime.status == RunStatus.STOPPED                                      -> 0xFFFF4444.toInt()
+    runtime.status == RunStatus.NOT_CONFIGURED                             -> 0xFF444444.toInt()
     else                                                                     -> 0xFF666666.toInt()
 }
 
@@ -54,5 +55,6 @@ fun statusLabel(runtime: ServiceRuntime) = when (runtime.status) {
         LoadLevel.UNKNOWN -> "Kör"
     }
     RunStatus.STOPPED -> "Stoppad"
+    RunStatus.NOT_CONFIGURED -> "Ej konfigurerad"
     RunStatus.UNKNOWN -> "Okänd"
 }

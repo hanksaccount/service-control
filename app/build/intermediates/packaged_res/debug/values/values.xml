@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="accent_blue">#00E5FF</color>
+    <color name="accent_green">#00FF88</color>
+    <color name="accent_magenta">#FF00FF</color>
+    <color name="accent_neon_blue">#00FFFF</color>
+    <color name="background_dark">#121212</color>
+    <color name="black">#FF000000</color>
+    <color name="card_background">#1E1E1E</color>
+    <color name="card_dark">#1E1E1E</color>
+    <color name="divider">#333333</color>
+    <color name="glass_white">#22FFFFFF</color>
+    <color name="ic_launcher_background">#1E1E1E</color>
+    <color name="neon_dark">#0A0A0A</color>
+    <color name="pill_dark">#2A2A2A</color>
+    <color name="terminal_black">#000000</color>
+    <color name="text_primary">#FFFFFF</color>
+    <color name="text_secondary">#B0B0B0</color>
+    <color name="white">#FFFFFFFF</color>
+    <dimen name="card_radius">24dp</dimen>
+    <dimen name="item_spacing">8dp</dimen>
+    <dimen name="pill_radius">12dp</dimen>
+    <dimen name="text_size_header">18sp</dimen>
+    <dimen name="text_size_key">12sp</dimen>
+    <dimen name="text_size_label">14sp</dimen>
+    <dimen name="widget_padding">16dp</dimen>
+    <string name="app_name">Shortcut Board</string>
+    <string name="widget_compact_description">Compact horizontal shortcut board</string>
+    <string name="widget_description">Scrollable list of shortcuts</string>
+    <string name="widget_name">Shortcut Board</string>
+    <style name="Theme.ShortcutBoard" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/background_dark</item>
+        <item name="colorPrimaryVariant">@color/black</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <item name="colorSecondary">@color/accent_blue</item>
+        <item name="android:statusBarColor">@color/background_dark</item>
+        <item name="android:windowBackground">@color/background_dark</item>
+    </style>
+</resources>

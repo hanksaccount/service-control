@@ -1,0 +1,36 @@
+R_DEF: Internal format may change without notice
+local
+color accent_blue
+color accent_green
+color accent_magenta
+color accent_neon_blue
+color background_dark
+color black
+color card_background
+color card_dark
+color divider
+color glass_white
+color ic_launcher_background
+color neon_dark
+color pill_dark
+color terminal_black
+color text_primary
+color text_secondary
+color white
+dimen card_radius
+dimen item_spacing
+dimen pill_radius
+dimen text_size_header
+dimen text_size_key
+dimen text_size_label
+dimen widget_padding
+drawable ic_launcher_foreground
+layout widget_loading
+mipmap ic_launcher
+mipmap ic_launcher_round
+string app_name
+string widget_compact_description
+string widget_description
+string widget_name
+style Theme.ShortcutBoard
+xml service_widget_info

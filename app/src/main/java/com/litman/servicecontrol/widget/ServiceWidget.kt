@@ -40,7 +40,7 @@ class ServiceWidget : GlanceAppWidget() {
         val servicesToShow = allWidgetEnabled.take(3)
 
         val runtimes: Map<String, ServiceRuntime> = servicesToShow.associate { s ->
-            s.id to (s.port?.let { manager.checkStatusWithLoad(it) } ?: ServiceRuntime.NO_PORT)
+            s.id to manager.checkStatusWithLoad(s.port)
         }
 
         val activeCount = runtimes.values.count { it.status == RunStatus.RUNNING }
@@ -139,7 +139,7 @@ private fun WidgetRoot(
 private fun ServiceRow(service: ServiceItem, runtime: ServiceRuntime) {
     val dotColorInt = statusDotColor(runtime)
     val label = statusLabel(runtime)
-    val name = service.displayName ?: service.name
+    val name = service.label
 
     Row(
         modifier = GlanceModifier
