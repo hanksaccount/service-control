@@ -41,25 +41,44 @@ fun MainScreen(serviceManager: ServiceManager) {
     var services by remember { mutableStateOf(serviceManager.getSavedServices()) }
     val scope = rememberCoroutineScope()
     var editingService by remember { mutableStateOf<ServiceItem?>(null) }
-    var scanError by remember { mutableStateOf(false) }
+    var statusMessage by remember { mutableStateOf<String?>(null) }
+    var probeResult by remember { mutableStateOf<String?>(null) }
 
     Column(modifier = Modifier.padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Service Control", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.White)
             Spacer(modifier = Modifier.weight(1f))
             Button(onClick = {
-                val ok = serviceManager.triggerDiscoveryScan()
-                if (!ok) {
-                    scanError = true
+                val error = serviceManager.triggerDiscoveryScan()
+                if (error != null) {
+                    statusMessage = "Scan fel: $error"
                 } else {
-                    scanError = false
+                    statusMessage = "Scan skickad, väntar på resultat..."
                     scope.launch {
-                        kotlinx.coroutines.delay(1500)
+                        kotlinx.coroutines.delay(2000)
                         services = serviceManager.syncDiscoveredScripts()
+                        statusMessage = "Hittade ${services.size} tjänster"
                     }
                 }
             }) {
                 Text("Scan")
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Button(onClick = {
+                val error = serviceManager.runProbe()
+                if (error != null) {
+                    probeResult = "Probe fel: $error"
+                } else {
+                    scope.launch {
+                        kotlinx.coroutines.delay(2000)
+                        probeResult = if (serviceManager.probeFileExists())
+                            "Probe OK — Termux svarar"
+                        else
+                            "Probe MISSLYCKADES — filen skapades inte (men inget exception)"
+                    }
+                }
+            }) {
+                Text("Probe")
             }
             Spacer(modifier = Modifier.width(8.dp))
             Button(onClick = {
@@ -73,13 +92,13 @@ fun MainScreen(serviceManager: ServiceManager) {
             }
         }
 
-        if (scanError) {
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                "Kunde inte nå Termux. Aktivera 'Allow External Apps' i Termux-inställningar, eller lägg till tjänster manuellt med +.",
-                color = Color(0xFFFF9800),
-                fontSize = 12.sp
-            )
+        if (statusMessage != null) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(statusMessage!!, color = Color(0xFFFF9800), fontSize = 12.sp)
+        }
+        if (probeResult != null) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(probeResult!!, color = Color(0xFF00E5FF), fontSize = 12.sp)
         }
 
         Spacer(modifier = Modifier.height(16.dp))

@@ -43,12 +43,12 @@ class ServiceManager(private val context: Context) {
         prefs.edit().putString("services_list", json).apply()
     }
 
-    // Denna körs när vi vill leta efter nya script i Termux
-    // Returnerar true om lyckades, false om Termux-permission saknas
-    fun triggerDiscoveryScan(): Boolean {
-        val outputDir = context.getExternalFilesDir(null)?.absolutePath ?: return false
+    // Returnerar null om lyckades, annars felmeddelandet
+    fun triggerDiscoveryScan(): String? {
+        val outputDir = context.getExternalFilesDir(null)?.absolutePath
+            ?: return "getExternalFilesDir() returnerade null"
         val outputPath = "$outputDir/discovered_scripts.txt"
-        val scanCommand = "ls /data/data/com.termux/files/home/.shortcuts/*.sh > \"$outputPath\" 2>/dev/null || echo ''"
+        val scanCommand = "ls /data/data/com.termux/files/home/.shortcuts/*.sh > \"$outputPath\" 2>/dev/null; echo done"
 
         val intent = Intent("com.termux.RUN_COMMAND")
         intent.setClassName("com.termux", "com.termux.app.RunCommandService")
@@ -57,11 +57,35 @@ class ServiceManager(private val context: Context) {
         intent.putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
 
         return try {
-            context.startForegroundService(intent)
-            true
+            context.startService(intent)
+            null
         } catch (e: Exception) {
-            false
+            "${e.javaClass.simpleName}: ${e.message}"
         }
+    }
+
+    // Probe-test: kör ett minimalt kommando, skriv "ok" till probe.txt
+    // Om filen skapas fungerar Termux-integrationen
+    fun runProbe(): String? {
+        val outputDir = context.getExternalFilesDir(null)?.absolutePath
+            ?: return "getExternalFilesDir() returnerade null"
+        val probeFile = "$outputDir/probe.txt"
+        val intent = Intent("com.termux.RUN_COMMAND")
+        intent.setClassName("com.termux", "com.termux.app.RunCommandService")
+        intent.putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash")
+        intent.putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf("-c", "echo ok > \"$probeFile\""))
+        intent.putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
+        return try {
+            context.startService(intent)
+            null
+        } catch (e: Exception) {
+            "${e.javaClass.simpleName}: ${e.message}"
+        }
+    }
+
+    fun probeFileExists(): Boolean {
+        val outputDir = context.getExternalFilesDir(null) ?: return false
+        return File(outputDir, "probe.txt").exists()
     }
 
     // Läser in resultatet från scanningen och uppdaterar listan
@@ -117,7 +141,7 @@ class ServiceManager(private val context: Context) {
         intent.putExtra("com.termux.RUN_COMMAND_ARGUMENTS", args)
         intent.putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
         try {
-            context.startForegroundService(intent)
+            context.startService(intent)
         } catch (e: Exception) {
             // Termux ej tillgängligt eller permission saknas
         }
