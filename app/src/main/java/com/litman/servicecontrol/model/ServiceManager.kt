@@ -44,20 +44,24 @@ class ServiceManager(private val context: Context) {
     }
 
     // Denna körs när vi vill leta efter nya script i Termux
-    fun triggerDiscoveryScan() {
-        // Vi ber Termux lista filer och skriva resultatet till en fil appen kan läsa
-        val outputDir = context.getExternalFilesDir(null)?.absolutePath ?: return
+    // Returnerar true om lyckades, false om Termux-permission saknas
+    fun triggerDiscoveryScan(): Boolean {
+        val outputDir = context.getExternalFilesDir(null)?.absolutePath ?: return false
         val outputPath = "$outputDir/discovered_scripts.txt"
-        
-        val scanCommand = "ls /data/data/com.termux/files/home/.shortcuts/*.sh > $outputPath"
-        
-        val intent = Intent("com.termux.instance.execute_script")
+        val scanCommand = "ls /data/data/com.termux/files/home/.shortcuts/*.sh > \"$outputPath\" 2>/dev/null || echo ''"
+
+        val intent = Intent("com.termux.RUN_COMMAND")
         intent.setClassName("com.termux", "com.termux.app.RunCommandService")
         intent.putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash")
         intent.putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf("-c", scanCommand))
         intent.putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
-        
-        context.startService(intent)
+
+        return try {
+            context.startService(intent)
+            true
+        } catch (e: Exception) {
+            false
+        }
     }
 
     // Läser in resultatet från scanningen och uppdaterar listan

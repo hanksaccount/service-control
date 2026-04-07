@@ -54,9 +54,17 @@ class ServiceWidget : GlanceAppWidget() {
             Spacer(modifier = GlanceModifier.height(8.dp))
             
             val serviceManager = ServiceManager(context)
-            serviceManager.getSavedServices().forEach { service ->
-                val isActive = statuses[service.id] ?: false
-                ServiceRow(service.name, service.port, service.icon, isActive, service.id, service.scriptPath)
+            val services = serviceManager.getSavedServices()
+            if (services.isEmpty()) {
+                Text(
+                    text = "Öppna appen och lägg till tjänster",
+                    style = TextStyle(color = ColorProvider(Color.Gray), fontSize = 12.sp)
+                )
+            } else {
+                services.forEach { service ->
+                    val isActive = statuses[service.id] ?: false
+                    ServiceRow(service.name, service.port, service.icon, isActive, service.id, service.scriptPath)
+                }
             }
         }
     }

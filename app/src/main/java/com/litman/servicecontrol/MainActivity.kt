@@ -41,27 +41,64 @@ fun MainScreen(serviceManager: ServiceManager) {
     var services by remember { mutableStateOf(serviceManager.getSavedServices()) }
     val scope = rememberCoroutineScope()
     var editingService by remember { mutableStateOf<ServiceItem?>(null) }
+    var scanError by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Service Control", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.White)
             Spacer(modifier = Modifier.weight(1f))
             Button(onClick = {
-                serviceManager.triggerDiscoveryScan()
-                scope.launch {
-                    kotlinx.coroutines.delay(1000)
-                    services = serviceManager.syncDiscoveredScripts()
+                val ok = serviceManager.triggerDiscoveryScan()
+                if (!ok) {
+                    scanError = true
+                } else {
+                    scanError = false
+                    scope.launch {
+                        kotlinx.coroutines.delay(1500)
+                        services = serviceManager.syncDiscoveredScripts()
+                    }
                 }
             }) {
-                Text("Scan Scripts")
+                Text("Scan")
             }
+            Spacer(modifier = Modifier.width(8.dp))
+            Button(onClick = {
+                val newService = com.litman.servicecontrol.model.ServiceItem(
+                    id = System.currentTimeMillis().toString(),
+                    name = "Ny tjänst",
+                    scriptPath = ""
+                )
+                val newList = services + newService
+                serviceManager.saveServices(newList)
+                services = newList
+                editingService = newService
+            }) {
+                Text("+")
+            }
+        }
+
+        if (scanError) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                "Kunde inte nå Termux. Aktivera 'Allow External Apps' i Termux-inställningar, eller lägg till tjänster manuellt med +.",
+                color = Color(0xFFFF9800),
+                fontSize = 12.sp
+            )
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            items(services) { service ->
-                ServiceCard(service, onEdit = { editingService = service })
+        if (services.isEmpty()) {
+            Text(
+                "Inga tjänster tillagda. Tryck Scan eller + för att lägga till.",
+                color = Color.Gray,
+                fontSize = 14.sp
+            )
+        } else {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                items(services) { service ->
+                    ServiceCard(service, onEdit = { editingService = service })
+                }
             }
         }
     }
