@@ -9,6 +9,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.glance.*
 import androidx.glance.action.ActionParameters
+import androidx.glance.action.actionParametersOf
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.provideContent
 import androidx.glance.background
@@ -22,8 +23,6 @@ import androidx.glance.Button
 import androidx.glance.text.FontWeight
 import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.actionRunCallback
-import androidx.glance.state.GlanceStateDefinition
-import androidx.glance.appwidget.state.updateAppWidgetState
 import com.litman.servicecontrol.model.ServiceManager
 
 class ServiceWidget : GlanceAppWidget() {
