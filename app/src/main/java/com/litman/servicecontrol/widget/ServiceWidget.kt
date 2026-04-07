@@ -5,13 +5,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.glance.*
+import androidx.glance.GlanceId
+import androidx.glance.GlanceModifier
 import androidx.glance.action.ActionParameters
+import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.cornerRadius
 import androidx.glance.appwidget.provideContent
+import androidx.glance.background
 import androidx.glance.layout.*
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
@@ -30,20 +33,29 @@ class ServiceWidget : GlanceAppWidget() {
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val manager = ServiceManager(context)
-        val allServices = manager.getSavedServices().filter { it.isEnabledOnWidget }
-        // Visa max 3 tjänster för att hålla det enkelt och stabilt
-        val services = allServices.take(3)
+        val allSaved = manager.getSavedServices()
+        val allWidgetEnabled = allSaved.filter { it.isEnabledOnWidget }
+        
+        // Max 3 tjänster för widget stabilitet
+        val servicesToShow = allWidgetEnabled.take(3)
 
-        val runtimes: Map<String, ServiceRuntime> = services.associate { s ->
+        val runtimes: Map<String, ServiceRuntime> = servicesToShow.associate { s ->
             s.id to (s.port?.let { manager.checkStatusWithLoad(it) } ?: ServiceRuntime.NO_PORT)
         }
 
         val activeCount = runtimes.values.count { it.status == RunStatus.RUNNING }
         val sysLoad    = systemLoad(runtimes.values)
-        val sysColor   = systemLoadColor(sysLoad)
+        val sysColorInt = systemLoadColor(sysLoad)
 
         provideContent {
-            WidgetRoot(services, runtimes, activeCount, allServices.size, sysLoad, sysColor)
+            WidgetRoot(
+                services = servicesToShow,
+                runtimes = runtimes,
+                activeCount = activeCount,
+                totalCount = allSaved.size,
+                sysLoad = sysLoad,
+                sysColor = sysColorInt
+            )
         }
     }
 }
@@ -60,10 +72,10 @@ private fun WidgetRoot(
     Column(
         modifier = GlanceModifier
             .fillMaxSize()
-            .background(Color(0xFF0D0D0D))
-            .padding(10.dp)
+            .background(ColorProvider(Color(0xFF0D0D0D)))
+            .padding(8.dp)
     ) {
-        // ── Header ──────────────────────────────────────────────
+        // --- Header ---
         Row(
             modifier = GlanceModifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
@@ -77,35 +89,37 @@ private fun WidgetRoot(
                         fontWeight = FontWeight.Bold
                     )
                 )
-                Spacer(GlanceModifier.height(2.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    StatusDot(color = Color(sysColor), size = 6.dp)
-                    Spacer(GlanceModifier.width(4.dp))
-                    Text(
-                        text = "System: $sysLoad  ·  $activeCount/$totalCount aktiva",
-                        style = TextStyle(
-                            color = ColorProvider(Color(sysColor)),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                Text(
+                    text = "System: " + sysLoad + "  ·  " + activeCount + "/" + totalCount + " aktiva",
+                    style = TextStyle(
+                        color = ColorProvider(Color(sysColor)),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
                     )
-                }
+                )
             }
-            // Enkel Refresh-knapp
+            
+            // Refresh
             Text(
                 text = "↺",
                 modifier = GlanceModifier
-                    .clickable(actionRunCallback<RefreshAction>())
-                    .padding(4.dp),
-                style = TextStyle(color = ColorProvider(Color(0xFF888888)), fontSize = 16.sp)
+                    .padding(4.dp)
+                    .clickable(actionRunCallback<RefreshAction>()),
+                style = TextStyle(
+                    color = ColorProvider(Color(0xFF888888)),
+                    fontSize = 18.sp
+                )
             )
         }
 
         Spacer(GlanceModifier.height(8.dp))
 
-        // ── Tjänster ────────────────────────────────────────────
+        // --- Services ---
         if (services.isEmpty()) {
-            Box(modifier = GlanceModifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(
+                modifier = GlanceModifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
                 Text(
                     text = "Inga tjänster i widgeten",
                     style = TextStyle(color = ColorProvider(Color(0xFF555555)), fontSize = 11.sp)
@@ -124,46 +138,46 @@ private fun WidgetRoot(
 @Composable
 private fun ServiceRow(service: ServiceItem, runtime: ServiceRuntime) {
     val dotColorInt = statusDotColor(runtime)
-    val dotColor = Color(dotColorInt)
     val label = statusLabel(runtime)
+    val name = service.displayName ?: service.name
 
     Row(
         modifier = GlanceModifier
             .fillMaxWidth()
-            .background(Color(0xFF1A1A1A))
+            .background(ColorProvider(Color(0xFF1A1A1A)))
             .cornerRadius(8.dp)
             .padding(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        StatusDot(color = dotColor, size = 8.dp)
+        // Enkel fyrkant som status-indikator istället för custom dot
+        Box(
+            modifier = GlanceModifier
+                .size(8.dp)
+                .background(ColorProvider(Color(dotColorInt)))
+                .cornerRadius(4.dp)
+        ) {}
+        
         Spacer(GlanceModifier.width(8.dp))
 
         Column(modifier = GlanceModifier.defaultWeight()) {
             Text(
-                text = service.label,
+                text = name,
                 style = TextStyle(
                     color = ColorProvider(Color.White),
-                    fontSize = 13.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Bold
                 )
             )
+            val info = if (service.port != null) label + " · :" + service.port else label
             Text(
-                text = if (service.port != null) "$label · :${service.port}" else label,
-                style = TextStyle(color = ColorProvider(dotColor), fontSize = 10.sp)
+                text = info,
+                style = TextStyle(
+                    color = ColorProvider(Color(dotColorInt)),
+                    fontSize = 10.sp
+                )
             )
         }
     }
-}
-
-@Composable
-private fun StatusDot(color: Color, size: androidx.compose.ui.unit.Dp) {
-    Box(
-        modifier = GlanceModifier
-            .width(size)
-            .height(size)
-            .background(color)
-            .cornerRadius(size / 2)
-    ) {}
 }
 
 class RefreshAction : ActionCallback {
