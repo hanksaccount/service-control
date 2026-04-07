@@ -1,0 +1,9 @@
+<resources>
+    <dimen name="widget_padding">16dp</dimen>
+    <dimen name="card_radius">24dp</dimen>
+    <dimen name="pill_radius">12dp</dimen>
+    <dimen name="text_size_header">18sp</dimen>
+    <dimen name="text_size_label">14sp</dimen>
+    <dimen name="text_size_key">12sp</dimen>
+    <dimen name="item_spacing">8dp</dimen>
+</resources>

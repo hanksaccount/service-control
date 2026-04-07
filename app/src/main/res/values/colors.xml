@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+    <color name="background_dark">#121212</color>
+    <color name="card_background">#1E1E1E</color>
+    <color name="card_dark">#1E1E1E</color>
+    <color name="pill_dark">#2A2A2A</color>
+    <color name="accent_blue">#00E5FF</color>
+    <color name="accent_green">#00FF88</color>
+    <color name="accent_magenta">#FF00FF</color>
+    <color name="accent_neon_blue">#00FFFF</color>
+    <color name="glass_white">#22FFFFFF</color>
+    <color name="terminal_black">#000000</color>
+    <color name="neon_dark">#0A0A0A</color>
+    <color name="text_primary">#FFFFFF</color>
+    <color name="text_secondary">#B0B0B0</color>
+    <color name="divider">#333333</color>
+    <color name="ic_launcher_background">#1E1E1E</color>
+</resources>
