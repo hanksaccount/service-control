@@ -8,6 +8,7 @@ import androidx.compose.ui.unit.sp
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.action.ActionParameters
+import androidx.glance.action.actionParametersOf
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.action.ActionCallback
@@ -27,27 +28,24 @@ class ServiceWidget : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val manager = ServiceManager(context)
         val allSaved = manager.getSavedServices()
-        val panels = allSaved.filter { it.group == ServiceGroup.PANELS || it.group == ServiceGroup.UNKNOWN }
-        val allWidgetEnabled = panels.filter { it.isEnabledOnWidget && (it.type == ServiceType.WEB_PANEL || it.type == ServiceType.HYBRID) }
         
-        val servicesToShow = allWidgetEnabled.take(3)
+        // Filter: only WEB_PANEL and HYBRID, and only widget-enabled
+        val servicesToShow = allSaved.filter { 
+            it.isEnabledOnWidget && (it.type == ServiceType.WEB_PANEL || it.type == ServiceType.HYBRID) 
+        }
 
         val runtimes: Map<String, ServiceRuntime> = servicesToShow.associate { s ->
-            s.id to manager.checkStatusWithLoad(s)
+            s.id to manager.checkStatus(s)
         }
 
         val activeCount = runtimes.values.count { it.status == RunStatus.RUNNING || it.status == RunStatus.ACTIVE }
-        val sysLoad    = systemLoad(runtimes.values)
-        val sysColorInt = systemLoadColor(sysLoad)
 
         provideContent {
             WidgetRoot(
                 services = servicesToShow,
                 runtimes = runtimes,
                 activeCount = activeCount,
-                totalCount = panels.size,
-                sysLoad = sysLoad,
-                sysColor = sysColorInt
+                totalCount = allSaved.count { it.group == ServiceGroup.PANELS }
             )
         }
     }
@@ -58,15 +56,13 @@ private fun WidgetRoot(
     services: List<ServiceItem>,
     runtimes: Map<String, ServiceRuntime>,
     activeCount: Int,
-    totalCount: Int,
-    sysLoad: String,
-    sysColor: Int
+    totalCount: Int
 ) {
     Column(
         modifier = GlanceModifier
             .fillMaxSize()
-            .background(ColorProvider(Color(0xFF0A0A0A)))
-            .padding(10.dp)
+            .background(ColorProvider(Color(0xFF050505)))
+            .padding(8.dp)
     ) {
         Row(
             modifier = GlanceModifier.fillMaxWidth(),
@@ -76,15 +72,15 @@ private fun WidgetRoot(
                 Text(
                     text = "SERVICE CONTROL",
                     style = TextStyle(
-                        color = ColorProvider(Color(0xFFBBBBBB)),
+                        color = ColorProvider(Color(0xFF666666)),
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Bold
                     )
                 )
                 Text(
-                    text = "$sysLoad · $activeCount/$totalCount aktiva",
+                    text = "$activeCount/$totalCount AKTIVA",
                     style = TextStyle(
-                        color = ColorProvider(Color(sysColor)),
+                        color = ColorProvider(Color.White),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -98,7 +94,7 @@ private fun WidgetRoot(
                     .clickable(actionRunCallback<RefreshActionWidget>()),
                 style = TextStyle(
                     color = ColorProvider(Color(0xFF444444)),
-                    fontSize = 18.sp
+                    fontSize = 16.sp
                 )
             )
         }
@@ -111,15 +107,15 @@ private fun WidgetRoot(
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = "Inga tjänster i widgeten",
-                    style = TextStyle(color = ColorProvider(Color(0xFF333333)), fontSize = 11.sp)
+                    text = "Inga tjänster",
+                    style = TextStyle(color = ColorProvider(Color(0xFF222222)), fontSize = 10.sp)
                 )
             }
         } else {
             services.forEach { service ->
                 val runtime = runtimes[service.id] ?: ServiceRuntime.UNKNOWN
                 ServiceWidgetRow(service, runtime)
-                Spacer(GlanceModifier.height(4.dp))
+                Spacer(GlanceModifier.height(2.dp))
             }
         }
     }
@@ -128,50 +124,104 @@ private fun WidgetRoot(
 @Composable
 private fun ServiceWidgetRow(service: ServiceItem, runtime: ServiceRuntime) {
     val dotColorInt = statusDotColor(runtime)
-    val label = statusLabel(runtime)
     val name = service.label
+    val isRunning = runtime.status == RunStatus.RUNNING || runtime.status == RunStatus.ACTIVE
 
     Row(
         modifier = GlanceModifier
             .fillMaxWidth()
-            .background(ColorProvider(Color(0xFF151515)))
-            .cornerRadius(4.dp)
-            .padding(6.dp),
+            .padding(vertical = 4.dp, horizontal = 2.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
             modifier = GlanceModifier
-                .size(6.dp)
+                .size(5.dp)
                 .background(ColorProvider(Color(dotColorInt)))
-                .cornerRadius(3.dp)
+                .cornerRadius(2.5.dp)
         ) {}
         
         Spacer(GlanceModifier.width(8.dp))
 
         Column(modifier = GlanceModifier.defaultWeight()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = name,
+                    style = TextStyle(
+                        color = ColorProvider(if (isRunning) Color.White else Color(0xFF888888)),
+                        fontSize = 12.sp,
+                        fontWeight = if (isRunning) FontWeight.Medium else FontWeight.Normal
+                    )
+                )
+                if (service.port != null) {
+                    Text(
+                        text = " :${service.port}",
+                        style = TextStyle(
+                            color = ColorProvider(Color(0xFF444444)),
+                            fontSize = 10.sp
+                        )
+                    )
+                }
+            }
+        }
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            val notisIcon = if (service.isMuted) "🔕" else "🔔"
             Text(
-                text = name,
+                text = notisIcon,
+                modifier = GlanceModifier
+                    .padding(horizontal = 6.dp)
+                    .clickable(actionRunCallback<ToggleMuteAction>(
+                        actionParametersOf(serviceIdKey to service.id)
+                    )),
                 style = TextStyle(
-                    color = ColorProvider(Color.White),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium
+                    color = ColorProvider(if (service.isMuted) Color(0xFF444444) else Color(0xFF888888)),
+                    fontSize = 14.sp
+                )
+            )
+
+            val powerColor = if (isRunning) Color(0xFF00FF88) else Color(0xFFFF4444)
+            Text(
+                text = "⏻",
+                modifier = GlanceModifier
+                    .padding(start = 6.dp)
+                    .clickable(actionRunCallback<TogglePowerAction>(
+                        actionParametersOf(
+                            serviceIdKey to service.id,
+                            isRunningKey to isRunning
+                        )
+                    )),
+                style = TextStyle(
+                    color = ColorProvider(powerColor),
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
                 )
             )
         }
-
-        val info = if (service.port != null) "$label · :${service.port}" else label
-        Text(
-            text = info,
-            style = TextStyle(
-                color = ColorProvider(Color(0xFF888888)),
-                fontSize = 10.sp
-            )
-        )
     }
 }
 
+private val serviceIdKey = ActionParameters.Key<String>("serviceId")
+private val isRunningKey = ActionParameters.Key<Boolean>("isRunning")
+
 class RefreshActionWidget : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
+        ServiceWidget().update(context, glanceId)
+    }
+}
+
+class ToggleMuteAction : ActionCallback {
+    override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
+        val serviceId = parameters[serviceIdKey] ?: return
+        ServiceManager(context).toggleMute(serviceId)
+        ServiceWidget().update(context, glanceId)
+    }
+}
+
+class TogglePowerAction : ActionCallback {
+    override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
+        val serviceId = parameters[serviceIdKey] ?: return
+        val isRunning = parameters[isRunningKey] ?: false
+        ServiceManager(context).togglePower(serviceId, isRunning)
         ServiceWidget().update(context, glanceId)
     }
 }
