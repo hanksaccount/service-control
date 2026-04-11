@@ -124,6 +124,42 @@ object TemplateRegistry {
     fun find(name: String) = templates.find { it.name == name }
 }
 
+// ── Widget settings ──────────────────────────────────────────────────────────
+
+data class WidgetSettings(
+    val nameSize: Float     = 13f,
+    val metaSize: Float     = 9f,
+    val padding: Float      = 12f,
+    val opacity: Int        = 230,
+    val cornerRadius: Float = 12f,
+    val fontStyle: String   = "SANS",    // SANS | MONO
+    val theme: String       = "GRAPHITE", // GRAPHITE | SLATE | DEEP_BLUE | SOFT_GREEN | AMBER | MONO
+    val showMemory: Boolean  = true,
+    val showColumnHeaders: Boolean = true
+)
+
+// ── Theme definitions ────────────────────────────────────────────────────────
+
+data class AppTheme(
+    val id: String,
+    val name: String,
+    val accent: Long,
+    val accentBg: Long,
+    val isPremium: Boolean = true
+)
+
+object Themes {
+    val ALL = listOf(
+        AppTheme("GRAPHITE",   "Graphite",   0xFFBBBBC8, 0xFF1A1A22),
+        AppTheme("SLATE",      "Slate",      0xFF708090, 0xFF14191E),
+        AppTheme("DEEP_BLUE",  "Deep Blue",  0xFF336699, 0xFF0A141E),
+        AppTheme("SOFT_GREEN", "Soft Green", 0xFF66BB6A, 0xFF0E1E12),
+        AppTheme("AMBER",      "Amber Ind.", 0xFFFFB300, 0xFF1E1600),
+        AppTheme("MONO",       "Monochrome", 0xFFEEEEF5, 0xFF16161E)
+    )
+    fun find(id: String) = ALL.find { it.id == id } ?: ALL[0]
+}
+
 // ── Service manager ──────────────────────────────────────────────────────────
 
 class ServiceManager(val context: Context) {
@@ -505,8 +541,12 @@ class ServiceManager(val context: Context) {
             if (existing == -1) {
                 current.add(if (template != null) ServiceItem(
                     id = path.hashCode().toString(), name = name,
-                    displayName = template.displayName, port = template.defaultPort,
-                    scriptPath = path, isEnabledOnWidget = template.showInWidget,
+                    displayName = template.displayName, scriptPath = path,
+                    stopFlagPath = template.stopFlagPath,
+                    ports = template.ports,
+                    killPatterns = template.killPatterns,
+                    notificationIds = template.notificationIds,
+                    isEnabledOnWidget = template.showInWidget,
                     type = template.type, group = template.group,
                     checkMode = template.checkMode, processMatch = template.processMatch,
                     canOpen = template.canOpen, openUrl = template.openUrl,
@@ -515,7 +555,11 @@ class ServiceManager(val context: Context) {
             } else if (template != null) {
                 val e = current[existing]
                 current[existing] = e.copy(
-                    displayName = template.displayName, port = template.defaultPort,
+                    displayName = template.displayName, scriptPath = path,
+                    stopFlagPath = template.stopFlagPath,
+                    ports = template.ports,
+                    killPatterns = template.killPatterns,
+                    notificationIds = template.notificationIds,
                     isEnabledOnWidget = template.showInWidget, type = template.type,
                     group = template.group, checkMode = template.checkMode,
                     processMatch = template.processMatch, canOpen = template.canOpen,
