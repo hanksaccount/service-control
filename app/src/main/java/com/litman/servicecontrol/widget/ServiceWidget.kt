@@ -65,12 +65,22 @@ class ServiceWidget : GlanceAppWidget() {
         }
         Log.d(TAG, "provideGlance: ${services.size} widget services")
 
-        // Use cached statuses for instant visual updates instead of blocking on network IO
-        val runtimes    = manager.getCachedStatuses()
-        val activeCount = services.count { service ->
-            val rt = runtimes[service.id]
-            rt != null && (rt.status == RunStatus.RUNNING || rt.status == RunStatus.ACTIVE)
+        // Use cached statuses but OVERRIDE with pending state if active
+        val cachedRuntimes = manager.getCachedStatuses()
+        val runtimes = services.associate { s ->
+            val pending = manager.getPendingState(s.id)
+            val rt = when (pending) {
+                "STARTING" -> ServiceRuntime(RunStatus.STARTING)
+                "STOPPING" -> ServiceRuntime(RunStatus.STOPPING)
+                else -> cachedRuntimes[s.id] ?: ServiceRuntime.UNKNOWN
+            }
+            s.id to rt
         }
+
+        val activeCount = runtimes.values.count { 
+            it.status == RunStatus.RUNNING || it.status == RunStatus.DEGRADED 
+        }
+        
         val pending = services.associate { it.id to manager.isPending(it.id) }
         // Uptime per running service (null when unknown or not tracked)
         val uptimes = services.associate { it.id to manager.getUptime(it.id) }
@@ -239,7 +249,7 @@ private fun WidgetServiceRow(
     accent: Color,
     theme: AppTheme
 ) {
-    val isRunning = runtime.status == RunStatus.RUNNING || runtime.status == RunStatus.ACTIVE
+    val isRunning = runtime.status == RunStatus.RUNNING || runtime.status == RunStatus.DEGRADED
     val isUnknown = runtime.status == RunStatus.UNKNOWN
 
     val nameColor = when {
@@ -329,7 +339,7 @@ private fun WidgetServiceRow(
         // ── Actions ──────────────────────────────────────────
         val actionTextSize = (settings.metaSize * 0.9f).sp
         val actionFont     = font
-        val isRunning      = runtime.status == RunStatus.RUNNING || runtime.status == RunStatus.ACTIVE
+        val isRunning      = runtime.status == RunStatus.RUNNING || runtime.status == RunStatus.DEGRADED
 
         Row(verticalAlignment = Alignment.CenterVertically) {
             // ── Open Link ──
@@ -407,36 +417,30 @@ class ToggleMuteAction : ActionCallback {
 class TogglePowerAction : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
         val serviceId = parameters[serviceIdKey] ?: return
-        Log.d(TAG, "TogglePowerAction: serviceId=$serviceId")
+        Log.d(TAG, "[ServiceCtrl] Widget Action ENTERED: id=$serviceId")
 
         val manager = ServiceManager(context)
+        val service = manager.getSavedServices().find { it.id == serviceId } ?: return
+
+        // 1. Re-check actual status to determine direction
+        val currentStatus    = manager.checkStatus(service)
+        val isCurrentlyRunning = currentStatus.status == RunStatus.RUNNING || 
+                                 currentStatus.status == RunStatus.DEGRADED
         
-        // 1. OMEDELBAR FEEDBACK (Innan tunga status-checks)
-        manager.markPending(serviceId)
+        // 2. OMEDELBAR FEEDBACK (markStarting/markStopping)
+        if (isCurrentlyRunning) manager.markStopping(serviceId) else manager.markStarting(serviceId)
         ServiceWidget().updateAll(context) 
 
-        val service = manager.getSavedServices().find { it.id == serviceId } ?: run {
-            manager.clearPending(serviceId)
-            ServiceWidget().updateAll(context)
-            return
-        }
-
-        // 2. Re-check actual status
-        val currentStatus    = manager.checkStatus(service)
-        val isCurrentlyRunning = currentStatus.status == RunStatus.RUNNING ||
-                                 currentStatus.status == RunStatus.ACTIVE
-        
         // 3. Command execution
+        Log.d(TAG, "[ServiceCtrl] Widget Action TOGGLE: id=$serviceId calling togglePower(isRunning=$isCurrentlyRunning)")
         manager.togglePower(serviceId, isCurrentlyRunning)
 
         // 4. Final verification & Global Sync
-        delay(1200)
-        val newStatus     = manager.checkStatus(service)
-        val isNowRunning  = newStatus.status == RunStatus.RUNNING || newStatus.status == RunStatus.ACTIVE
+        delay(1500)
+        val newStatus = manager.checkStatus(service)
+        Log.d(TAG, "[ServiceCtrl] Widget Action FINAL: id=$serviceId newStatus=${newStatus.status}")
         
-        if (isNowRunning && !isCurrentlyRunning) manager.recordStartTime(serviceId)
-        if (!isNowRunning && isCurrentlyRunning) manager.clearStartTime(serviceId)
-        
+        // Clear pending so reality (from cache or live) can take over
         manager.clearPending(serviceId)
         ServiceWidget().updateAll(context)
     }

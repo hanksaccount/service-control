@@ -203,29 +203,31 @@ class ServiceManager(val context: Context) {
     fun saveWidgetSettings(settings: WidgetSettings) {
         val json = gson.toJson(settings)
         prefs.edit().putString("widget_settings", json).commit()
-        Log.d(TAG, "saveWidgetSettings: opacity=${settings.opacity} font=${settings.fontStyle} theme=${settings.theme}")
+        Log.d(TAG, "[ServiceCtrl] saveWidgetSettings: opacity=${settings.opacity} font=${settings.fontStyle} theme=${settings.theme}")
     }
 
     // ── Pending action tracking ───────────────────────────────────────────────
-    // Used by both the app and the widget to show "pending" visual state
-    // while a start/stop command is in flight.
+    // Key: serviceId, Value: STARTING | STOPPING
 
-    fun markPending(serviceId: String) {
-        val set = prefs.getStringSet("pending_actions", emptySet())!!.toMutableSet()
-        set.add(serviceId)
-        prefs.edit().putStringSet("pending_actions", set).commit()
-        Log.d(TAG, "markPending: $serviceId")
+    fun markStarting(serviceId: String) {
+        prefs.edit().putString("pending_$serviceId", "STARTING").commit()
+        Log.d(TAG, "[ServiceCtrl] markStarting: $serviceId")
+    }
+
+    fun markStopping(serviceId: String) {
+        prefs.edit().putString("pending_$serviceId", "STOPPING").commit()
+        Log.d(TAG, "[ServiceCtrl] markStopping: $serviceId")
     }
 
     fun clearPending(serviceId: String) {
-        val set = prefs.getStringSet("pending_actions", emptySet())!!.toMutableSet()
-        set.remove(serviceId)
-        prefs.edit().putStringSet("pending_actions", set).commit()
-        Log.d(TAG, "clearPending: $serviceId")
+        prefs.edit().remove("pending_$serviceId").commit()
+        Log.d(TAG, "[ServiceCtrl] clearPending: $serviceId")
     }
 
-    fun isPending(serviceId: String): Boolean =
-        prefs.getStringSet("pending_actions", emptySet())!!.contains(serviceId)
+    fun getPendingState(serviceId: String): String? =
+        prefs.getString("pending_$serviceId", null)
+
+    fun isPending(serviceId: String): Boolean = getPendingState(serviceId) != null
 
     // ── Service list ──────────────────────────────────────────────────────────
 
@@ -303,46 +305,52 @@ class ServiceManager(val context: Context) {
 
     suspend fun checkStatus(item: ServiceItem): ServiceRuntime = when (item.checkMode) {
         StatusCheckMode.ACTION  -> ServiceRuntime.UNKNOWN
-        StatusCheckMode.PORT    -> checkTcpPort(item.port)
+        StatusCheckMode.PORT    -> checkTcpPorts(item.ports)
         StatusCheckMode.PROCESS -> checkProcess(item)
     }
 
-    private suspend fun checkTcpPort(port: Int?): ServiceRuntime {
-        if (port == null) return ServiceRuntime.NO_PORT
+    private suspend fun checkTcpPorts(ports: List<Int>): ServiceRuntime {
+        if (ports.isEmpty()) return ServiceRuntime.UNKNOWN
+        
         return withContext(Dispatchers.IO) {
-            try {
-                Socket().use { socket ->
-                    socket.connect(InetSocketAddress("127.0.0.1", port), 500)
+            var upCount = 0
+            ports.forEach { port ->
+                try {
+                    Socket().use { socket ->
+                        socket.connect(InetSocketAddress("127.0.0.1", port), 500)
+                        upCount++
+                    }
+                } catch (e: Exception) {
+                    // Port is down
                 }
-                Log.d(TAG, "checkTcpPort: port=$port → RUNNING")
-                ServiceRuntime(RunStatus.RUNNING)
-            } catch (e: Exception) {
-                Log.d(TAG, "checkTcpPort: port=$port → STOPPED (${e.javaClass.simpleName})")
-                ServiceRuntime(RunStatus.STOPPED)
             }
+            
+            val status = when {
+                upCount == 0 -> RunStatus.STOPPED
+                upCount == ports.size -> RunStatus.RUNNING
+                else -> RunStatus.DEGRADED
+            }
+            
+            Log.d(TAG, "[ServiceCtrl] checkTcpPorts: ports=$ports → $status ($upCount/${ports.size} up)")
+            ServiceRuntime(status)
         }
     }
 
     private suspend fun checkProcess(item: ServiceItem): ServiceRuntime {
         val match = item.processMatch
         if (!match.isNullOrBlank()) {
-            val result = withContext(Dispatchers.IO) {
+            val isUp = withContext(Dispatchers.IO) {
                 try {
                     val proc = Runtime.getRuntime().exec(arrayOf("pgrep", "-f", match))
-                    if (proc.waitFor() == 0) RunStatus.ACTIVE else null
+                    proc.waitFor() == 0
                 } catch (e: Exception) {
-                    Log.w(TAG, "checkProcess: pgrep failed for '$match' (${e.javaClass.simpleName})")
-                    null
+                    false
                 }
             }
-            if (result != null) {
-                Log.d(TAG, "checkProcess: '$match' → $result")
-                return ServiceRuntime(result)
-            }
+            if (isUp) return ServiceRuntime(RunStatus.RUNNING)
         }
         // Fallback to port check
-        if (item.port != null) return checkTcpPort(item.port)
-        return ServiceRuntime.UNKNOWN
+        return checkTcpPorts(item.ports)
     }
 
     // ── Actions ───────────────────────────────────────────────────────────────
@@ -352,81 +360,54 @@ class ServiceManager(val context: Context) {
         sendTermuxCommand(arrayOf(scriptPath))
     }
 
-    /**
-     * STOPS a service fully:
-     * 1. Sets STOP flag
-     * 2. Kills all associated ports
-     * 3. Kills all process patterns
-     * 4. Clears all associated termux-notifications
-     */
     fun stopService(item: ServiceItem) {
         val flag = item.stopFlagPath ?: "/data/data/com.termux/files/home/STOP_${item.name.replace('-', '_').uppercase()}"
-        
         val cmds = mutableListOf<String>()
-        
-        // 1. Flag
         cmds.add("touch $flag")
-        
-        // 2. Ports
-        item.ports.forEach { port ->
-            cmds.add("fuser -k $port/tcp 2>/dev/null || true")
-        }
-        
-        // 3. Process patterns
-        item.killPatterns.forEach { pattern ->
-            cmds.add("pkill -f \"$pattern\" 2>/dev/null || true")
-        }
-        
-        // 4. Notifications
-        item.notificationIds.forEach { nid ->
-            cmds.add("termux-notification --remove \"$nid\" 2>/dev/null || true")
-        }
+        item.ports.forEach { port -> cmds.add("fuser -k $port/tcp 2>/dev/null || true") }
+        item.killPatterns.forEach { pattern -> cmds.add("pkill -f \"$pattern\" 2>/dev/null || true") }
+        item.notificationIds.forEach { nid -> cmds.add("termux-notification --remove \"$nid\" 2>/dev/null || true") }
 
         val fullCmd = cmds.joinToString("; ")
-        Log.d(TAG, "STOP ACTION: ${item.label}\n  Flag: $flag\n  Ports: ${item.ports}\n  Patterns: ${item.killPatterns}\n  Notifs: ${item.notificationIds}")
+        Log.d(TAG, "[ServiceCtrl] STOP ACTION: id=${item.id} name=${item.name}")
+        Log.d(TAG, "[ServiceCtrl]   Ports: ${item.ports}")
+        Log.d(TAG, "[ServiceCtrl]   Patterns: ${item.killPatterns}")
+        Log.d(TAG, "[ServiceCtrl]   Notifs: ${item.notificationIds}")
+        Log.d(TAG, "[ServiceCtrl]   Bash: $fullCmd")
         sendTermuxCommand(arrayOf("-c", fullCmd))
     }
 
-    /**
-     * STARTS a service fully:
-     * 1. Removes STOP flag
-     * 2. Runs start script
-     */
     fun startService(item: ServiceItem) {
         val flag = item.stopFlagPath ?: "/data/data/com.termux/files/home/STOP_${item.name.replace('-', '_').uppercase()}"
-        
-        Log.d(TAG, "START ACTION: ${item.label}\n  Remove Flag: $flag\n  Script: ${item.scriptPath}")
-        
         val fullCmd = "rm -f $flag; ${item.scriptPath}"
+        Log.d(TAG, "[ServiceCtrl] START ACTION: id=${item.id} name=${item.name}")
+        Log.d(TAG, "[ServiceCtrl]   Flag: $flag")
+        Log.d(TAG, "[ServiceCtrl]   Script: ${item.scriptPath}")
+        Log.d(TAG, "[ServiceCtrl]   Bash: $fullCmd")
         sendTermuxCommand(arrayOf("-c", fullCmd))
-    }
-
-    fun toggleMute(serviceId: String) {
-        val services = getSavedServices().toMutableList()
-        val idx = services.indexOfFirst { it.id == serviceId }
-        if (idx != -1) {
-            services[idx] = services[idx].copy(isMuted = !services[idx].isMuted)
-            saveServices(services)
-        }
     }
 
     fun togglePower(serviceId: String, isRunning: Boolean) {
         val services = getSavedServices().toMutableList()
         val idx = services.indexOfFirst { it.id == serviceId }
         if (idx == -1) {
-            Log.w(TAG, "togglePower: service not found: $serviceId")
+            Log.w(TAG, "[ServiceCtrl] togglePower: service NOT FOUND: $serviceId")
             return
         }
         val item = services[idx]
-        Log.d(TAG, "togglePower: ${item.label} isRunning=$isRunning → ${if (isRunning) "STOP" else "START"}")
+        Log.d(TAG, "[ServiceCtrl] togglePower: id=$serviceId isRunningIn=$isRunning isManuallyStoppedBefore=${item.isManuallyStopped}")
         
         if (isRunning) {
+            markStopping(serviceId)
             services[idx] = item.copy(isManuallyStopped = true)
             saveServices(services)
+            Log.d(TAG, "[ServiceCtrl]   Decided: STOP")
             stopService(item)
         } else {
+            markStarting(serviceId)
             services[idx] = item.copy(isManuallyStopped = false)
             saveServices(services)
+            Log.d(TAG, "[ServiceCtrl]   Decided: START")
             startService(item)
         }
     }

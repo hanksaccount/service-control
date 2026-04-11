@@ -76,43 +76,45 @@ class MainActivity : ComponentActivity() {
 fun ServiceControlApp(manager: ServiceManager) {
     var services        by remember { mutableStateOf(manager.getSavedServices()) }
     val runtimes         = remember { mutableStateMapOf<String, ServiceRuntime>() }
-    val pendingServices  = remember { mutableStateMapOf<String, Boolean>() }
+    val pendingStates    = remember { mutableStateMapOf<String, String>() }
     val scope            = rememberCoroutineScope()
+    
+    // The "real" settings synced with disk
     var settings        by remember { mutableStateOf(manager.getWidgetSettings()) }
+    // The "draft" settings used for live UI updates during slider drag
+    var draftSettings   by remember { mutableStateOf(settings) }
+    
     var showSettings    by remember { mutableStateOf(false) }
 
     fun refreshAll() {
         scope.launch {
             services = manager.getSavedServices()
-            // Parallel checks — all services complete in ~1 s instead of N × 1 s
             val statuses = manager.checkAllStatuses(services)
             statuses.forEach { (id, rt) -> runtimes[id] = rt }
-            Log.d(TAG, "refreshAll: ${services.size} services checked in parallel")
+            
+            // Clean up local pending states if they match reality
+            services.forEach { s ->
+                val p = manager.getPendingState(s.id)
+                if (p != null) pendingStates[s.id] = p else pendingStates.remove(s.id)
+            }
         }
     }
 
     fun pushWidget() {
         scope.launch {
-            Log.d(TAG, "pushWidget: pushing to all widget instances")
+            Log.d(TAG, "[ServiceCtrl] pushWidget: pushing to all widget instances")
             ServiceWidget().updateAll(manager.context)
         }
     }
 
-    // Save settings without pushing — called on every slider drag tick
-    fun updateSettings(new: WidgetSettings) {
+    // Save and Apply settings (Commit to disk + Update Widget)
+    fun commitSettings(new: WidgetSettings) {
         settings = new
         manager.saveWidgetSettings(new)
-        Log.d(TAG, "updateSettings: saved opacity=${new.opacity} font=${new.fontStyle} theme=${new.theme}")
-        // IMPORTANT: We do NOT call applySettings() here to avoid widget thrashing
-    }
-
-    // Push saved settings to widget — called on slider release / toggle / picker select
-    fun applySettings() {
-        Log.d(TAG, "applySettings: pushing widget update")
+        Log.d(TAG, "[ServiceCtrl] commitSettings: saved and pushing widget update")
         pushWidget()
     }
 
-    LaunchedEffect(Unit) {
         while (true) { refreshAll(); delay(15_000) }
     }
 
@@ -161,9 +163,9 @@ fun ServiceControlApp(manager: ServiceManager) {
 
         if (showSettings) {
             SettingsPane(
-                settings = settings,
-                onUpdate = ::updateSettings,
-                onApply  = ::applySettings
+                settings = draftSettings,
+                onUpdate = { draftSettings = it },
+                onApply  = { commitSettings(draftSettings) }
             )
         } else {
             ServiceListPane(
@@ -503,7 +505,7 @@ fun ServiceRow(
     onRefresh: () -> Unit
 ) {
     val scope      = rememberCoroutineScope()
-    val isRunning  = runtime.status == RunStatus.RUNNING || runtime.status == RunStatus.ACTIVE
+    val isRunning  = runtime.status == RunStatus.RUNNING || runtime.status == RunStatus.DEGRADED
     val isUnknown  = runtime.status == RunStatus.UNKNOWN
     
     // Use current theme colors
@@ -576,22 +578,13 @@ fun ServiceRow(
                 .then(
                     if (!isPending) Modifier.clickable {
                         scope.launch {
-                            Log.d(TAG, "ServiceRow: tap ${service.label} isRunning=$isRunning → ${if (isRunning) "STOP" else "START"}")
-                            onPending(service.id, true)
-                            manager.markPending(service.id)
+                            Log.d(TAG, "[ServiceCtrl] ServiceRow TAP: id=${service.id} action=${if (isRunning) "STOP" else "START"}")
                             manager.togglePower(service.id, isRunning)
                             
-                            // Faster feedback loop
-                            delay(1200)
-                            
-                            val newRt       = manager.checkStatus(service)
-                            val isNowRunning = newRt.status == RunStatus.RUNNING || newRt.status == RunStatus.ACTIVE
-                            if (isNowRunning && !isRunning)  manager.recordStartTime(service.id)
-                            if (!isNowRunning && isRunning)  manager.clearStartTime(service.id)
-                            
-                            manager.clearPending(service.id)
-                            onPending(service.id, false)
-                            onRefresh()
+                            // Visual feedback loop: Wait for Termux + verify
+                            delay(1500)
+                            refreshAll()
+                            pushWidget()
                         }
                     } else Modifier
                 )

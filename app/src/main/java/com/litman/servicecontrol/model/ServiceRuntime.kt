@@ -1,10 +1,11 @@
 package com.litman.servicecontrol.model
 
 enum class RunStatus { 
-    RUNNING,         // Port svarar (PORT-mode)
-    ACTIVE,          // Process hittad (PROCESS-mode)
-    STOPPED,         // Ingen port/process hittad
-    NOT_CONFIGURED,  // Saknar konfiguration
+    STOPPED,    // Ingen port svarar
+    STARTING,   // Visuellt läge: Väntar på portar
+    RUNNING,    // Samtliga hälsoportar svarar
+    DEGRADED,   // Vissa portar uppe, men inte alla
+    STOPPING,   // Visuellt läge: Väntar på att portar ska dö
     UNKNOWN 
 }
 
@@ -32,20 +33,24 @@ data class ServiceRuntime(
 ) {
     companion object {
         val UNKNOWN = ServiceRuntime(RunStatus.UNKNOWN)
-        val NO_PORT = ServiceRuntime(RunStatus.NOT_CONFIGURED)
+        val STOPPED = ServiceRuntime(RunStatus.STOPPED)
     }
 }
 
 fun statusDotColor(runtime: ServiceRuntime): Int = when (runtime.status) {
-    RunStatus.RUNNING, RunStatus.ACTIVE -> 0xFF00FF88.toInt() // Grön för båda
-    RunStatus.STOPPED -> 0xFFFF4444.toInt() // Röd
-    RunStatus.NOT_CONFIGURED -> 0xFF444444.toInt()
-    else -> 0xFF666666.toInt()
+    RunStatus.RUNNING  -> 0xFF00FF88.toInt() // Grön
+    RunStatus.DEGRADED -> 0xFFFFAA00.toInt() // Orange
+    RunStatus.STARTING -> 0xFFFFFF00.toInt() // Gul
+    RunStatus.STOPPING -> 0xFFFF6600.toInt() // Mörkorange
+    RunStatus.STOPPED  -> 0xFFFF4444.toInt() // Röd
+    else               -> 0xFF444444.toInt()
 }
 
 fun statusLabel(runtime: ServiceRuntime) = when (runtime.status) {
-    RunStatus.RUNNING, RunStatus.ACTIVE -> "Kör"
-    RunStatus.STOPPED -> "Stoppad"
-    RunStatus.NOT_CONFIGURED -> "Ej konfigurerad"
-    else -> "Okänd"
+    RunStatus.RUNNING  -> "ONLINE"
+    RunStatus.DEGRADED -> "PARTIAL"
+    RunStatus.STARTING -> "STARTING"
+    RunStatus.STOPPING -> "STOPPING"
+    RunStatus.STOPPED  -> "OFFLINE"
+    else               -> "UNKNOWN"
 }
