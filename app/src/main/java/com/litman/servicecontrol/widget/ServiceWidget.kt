@@ -38,17 +38,7 @@ private fun widgetFont(style: String): FontFamily = when (style) {
     else   -> FontFamily.SansSerif
 }
 
-private fun widgetAccent(style: String): Color = when (style) {
-    "CYAN"  -> Color(0xFF00C8DD)
-    "AMBER" -> Color(0xFFFFB300)
-    else    -> Color(0xFF00D966)
-}
-
-private fun widgetAccentBg(style: String): Color = when (style) {
-    "CYAN"  -> Color(0xFF0C1F25)
-    "AMBER" -> Color(0xFF1E1600)
-    else    -> Color(0xFF0C1E12)
-}
+private fun themeColors(themeId: String): AppTheme = Themes.find(themeId)
 
 // ── Data helpers ──────────────────────────────────────────────────────────────
 
@@ -110,8 +100,9 @@ private fun WidgetBoard(
     uptimes: Map<String, String?>,
     settings: WidgetSettings
 ) {
+    val theme  = themeColors(settings.theme)
     val bg     = Color(red = 13, green = 13, blue = 17, alpha = settings.opacity)
-    val accent = widgetAccent(settings.accentColor)
+    val accent = Color(theme.accent)
     val font   = widgetFont(settings.fontStyle)
     val total  = services.size
     val pad    = settings.padding.dp
@@ -227,7 +218,7 @@ private fun WidgetBoard(
                 val runtime   = runtimes[service.id] ?: ServiceRuntime.UNKNOWN
                 val isPending = pending[service.id] ?: false
                 val uptime    = uptimes[service.id]
-                WidgetServiceRow(service, runtime, isPending, uptime, settings, font, accent)
+                WidgetServiceRow(service, runtime, isPending, uptime, settings, font, accent, theme)
                 if (index < services.lastIndex) Spacer(GlanceModifier.height(8.dp))
             }
         }
@@ -244,7 +235,8 @@ private fun WidgetServiceRow(
     uptime: String?,
     settings: WidgetSettings,
     font: FontFamily,
-    accent: Color
+    accent: Color,
+    theme: AppTheme
 ) {
     val isRunning = runtime.status == RunStatus.RUNNING || runtime.status == RunStatus.ACTIVE
     val isUnknown = runtime.status == RunStatus.UNKNOWN
@@ -338,9 +330,9 @@ private fun WidgetServiceRow(
             Spacer(GlanceModifier.width(6.dp))
             Box(
                 modifier = GlanceModifier
-                    .size((settings.nameSize * 2.0f).dp)
+                    .size((settings.nameSize * 2.2f).dp)
                     .background(ColorProvider(Color(0xFF0E1A22)))
-                    .cornerRadius(7.dp)
+                    .cornerRadius(8.dp)
                     .clickable(
                         actionStartActivity(
                             Intent(Intent.ACTION_VIEW, Uri.parse(service.openUrl))
@@ -352,51 +344,57 @@ private fun WidgetServiceRow(
                     text = "↗",
                     style = TextStyle(
                         color      = ColorProvider(Color(0xFF2A6080)),
-                        fontSize   = (settings.nameSize * 0.85f).sp,
+                        fontSize   = (settings.nameSize * 0.9f).sp,
                         fontFamily = font
                     )
                 )
             }
-            Spacer(GlanceModifier.width(6.dp))
+            Spacer(GlanceModifier.width(8.dp))
         }
 
         // ── Power button ──────────────────────────────────────
-        val btnSize = (settings.nameSize * 2.0f).dp
-        val btnBg = when {
-            isPending -> Color(0xFF1A1A22)
-            isRunning -> widgetAccentBg(settings.accentColor)
-            else      -> Color(0xFF1C0E0E)
-        }
-        val btnFg = when {
-            isPending -> Color(0xFF353545)
-            isRunning -> accent
-            isUnknown -> Color(0xFF3A3A4A)
-            else      -> Color(0xFF883333)
-        }
-
+        val btnSize = (settings.nameSize * 2.2f).dp
+        val touchTarget = 44.dp
+        
         Box(
             modifier = GlanceModifier
-                .size(btnSize)
-                .background(ColorProvider(btnBg))
-                .cornerRadius(7.dp)
+                .size(touchTarget)
                 .clickable(
                     actionRunCallback<TogglePowerAction>(
-                        // Only pass serviceId — we re-check actual status inside callback
-                        // to avoid acting on stale widget display state
                         actionParametersOf(serviceIdKey to service.id)
                     )
                 ),
             contentAlignment = Alignment.Center
         ) {
-            Text(
-                text = if (isPending) "·" else "⏻",
-                style = TextStyle(
-                    color      = ColorProvider(btnFg),
-                    fontSize   = (settings.nameSize * 0.95f).sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = font
+            val btnBg = when {
+                isPending -> Color(0xFF1A1A22)
+                isRunning -> Color(theme.accentBg)
+                else      -> Color(0xFF1C0E0E)
+            }
+            val btnFg = when {
+                isPending -> Color(0xFF353545)
+                isRunning -> accent
+                isUnknown -> Color(0xFF3A3A4A)
+                else      -> Color(0xFFBB3333)
+            }
+
+            Box(
+                modifier = GlanceModifier
+                    .size(btnSize)
+                    .background(ColorProvider(btnBg))
+                    .cornerRadius(8.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = if (isPending) "·" else "⏻",
+                    style = TextStyle(
+                        color      = ColorProvider(btnFg),
+                        fontSize   = (settings.nameSize * 1.0f).sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = font
+                    )
                 )
-            )
+            }
         }
     }
 }
@@ -423,40 +421,38 @@ class ToggleMuteAction : ActionCallback {
 
 class TogglePowerAction : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
-        val serviceId = parameters[serviceIdKey] ?: run {
-            Log.w(TAG, "TogglePowerAction: missing serviceId")
-            return
-        }
+        val serviceId = parameters[serviceIdKey] ?: return
         Log.d(TAG, "TogglePowerAction: serviceId=$serviceId")
 
         val manager = ServiceManager(context)
+        
+        // 1. OMEDELBAR FEEDBACK (Innan tunga status-checks)
+        manager.markPending(serviceId)
+        ServiceWidget().updateAll(context) 
+
         val service = manager.getSavedServices().find { it.id == serviceId } ?: run {
-            Log.w(TAG, "TogglePowerAction: service not found: $serviceId")
+            manager.clearPending(serviceId)
+            ServiceWidget().updateAll(context)
             return
         }
 
-        // Re-check actual current status — never trust stale widget display state
+        // 2. Re-check actual status
         val currentStatus    = manager.checkStatus(service)
         val isCurrentlyRunning = currentStatus.status == RunStatus.RUNNING ||
                                  currentStatus.status == RunStatus.ACTIVE
-        Log.d(TAG, "TogglePowerAction: ${service.label} currentlyRunning=$isCurrentlyRunning")
-
-        // Mark pending before sending command so next render shows feedback
-        manager.markPending(serviceId)
-        ServiceWidget().update(context, glanceId)  // immediate: show pending state
-
-        // Send the actual command to Termux
+        
+        // 3. Command execution
         manager.togglePower(serviceId, isCurrentlyRunning)
 
-        // Wait for the service to respond, re-check, track uptime, clear pending
-        delay(2500)
+        // 4. Final verification & Global Sync
+        delay(1200)
         val newStatus     = manager.checkStatus(service)
         val isNowRunning  = newStatus.status == RunStatus.RUNNING || newStatus.status == RunStatus.ACTIVE
-        when {
-            isNowRunning && !isCurrentlyRunning -> manager.recordStartTime(serviceId)
-            !isNowRunning && isCurrentlyRunning -> manager.clearStartTime(serviceId)
-        }
+        
+        if (isNowRunning && !isCurrentlyRunning) manager.recordStartTime(serviceId)
+        if (!isNowRunning && isCurrentlyRunning) manager.clearStartTime(serviceId)
+        
         manager.clearPending(serviceId)
-        ServiceWidget().update(context, glanceId)  // final: show real new status
+        ServiceWidget().updateAll(context)
     }
 }

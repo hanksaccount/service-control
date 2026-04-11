@@ -281,10 +281,10 @@ fun SettingsPane(
             FontPicker(settings.fontStyle) { onUpdate(settings.copy(fontStyle = it)); onApply() }
         }
 
-        // ── Accent ──────────────────────────────────────────
-        item { Spacer(Modifier.height(6.dp)); SectionLabel("ACCENT COLOR") }
+        // ── Theme ──────────────────────────────────────────
+        item { Spacer(Modifier.height(6.dp)); SectionLabel("THEME") }
         item {
-            AccentPicker(settings.accentColor) { onUpdate(settings.copy(accentColor = it)); onApply() }
+            ThemePicker(settings.theme) { onUpdate(settings.copy(theme = it)); onApply() }
         }
 
         item { Spacer(Modifier.height(24.dp)) }
@@ -406,42 +406,52 @@ fun FontCard(
     }
 }
 
-// ── Accent color picker ───────────────────────────────────────────────────────
+// ── Theme picker ─────────────────────────────────────────────────────────────
 
 @Composable
-fun AccentPicker(current: String, onSelect: (String) -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        AccentCard("GREEN", GREEN,  "Terminal",   current, onSelect, Modifier.weight(1f))
-        AccentCard("CYAN",  CYAN,   "Tech",       current, onSelect, Modifier.weight(1f))
-        AccentCard("AMBER", AMBER,  "Industrial", current, onSelect, Modifier.weight(1f))
+fun ThemePicker(current: String, onSelect: (String) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        val rows = Themes.ALL.chunked(3)
+        rows.forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                row.forEach { theme ->
+                    ThemeCard(theme, current == theme.id, onSelect, Modifier.weight(1f))
+                }
+                // Fill up empty space if last row is incomplete
+                repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
     }
 }
 
 @Composable
-fun AccentCard(
-    id: String, color: Color, label: String,
-    current: String, onSelect: (String) -> Unit,
+fun ThemeCard(
+    theme: AppTheme,
+    isSelected: Boolean,
+    onSelect: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val isSelected = current == id
+    val color = Color(theme.accent)
+    val bg    = if (isSelected) Color(theme.accentBg) else SURF
+
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(10.dp))
-            .background(if (isSelected) accentBgOf(id) else SURF)
+            .background(bg)
             .border(1.dp, if (isSelected) color else LINE, RoundedCornerShape(10.dp))
-            .clickable { onSelect(id) }
-            .padding(horizontal = 10.dp, vertical = 12.dp),
+            .clickable { onSelect(theme.id) }
+            .padding(vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(
-            Modifier.size(18.dp)
-                .background(color.copy(alpha = if (isSelected) 1f else 0.4f), RoundedCornerShape(9.dp))
+            Modifier.size(16.dp)
+                .background(color.copy(alpha = if (isSelected) 1f else 0.4f), RoundedCornerShape(8.dp))
         )
         Spacer(Modifier.height(6.dp))
-        Text(label, fontSize = 10.sp, color = if (isSelected) TEXT else MUTED,
+        Text(theme.name, fontSize = 9.sp, color = if (isSelected) TEXT else MUTED,
              fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal)
     }
 }
@@ -494,7 +504,12 @@ fun ServiceRow(
     val scope      = rememberCoroutineScope()
     val isRunning  = runtime.status == RunStatus.RUNNING || runtime.status == RunStatus.ACTIVE
     val isUnknown  = runtime.status == RunStatus.UNKNOWN
-    val dotColor   = Color(statusDotColor(runtime))
+    
+    // Use current theme colors
+    val settings   = remember { manager.getWidgetSettings() }
+    val theme      = Themes.find(settings.theme)
+    val accent     = Color(theme.accent)
+    val accentBg   = Color(theme.accentBg)
 
     val modeStr = when {
         service.checkMode == StatusCheckMode.PORT && service.port != null -> ":${service.port}"
@@ -505,14 +520,16 @@ fun ServiceRow(
     // Visual state derived from pending / runtime
     val nameColor  = if (isPending) MUTED else TEXT
     val statusText = if (isPending) "···" else statusLabel(runtime)
+    val statusColor = if (isPending) DIM else if (isRunning) accent else RED
+    
     val btnBg = when {
         isPending  -> Color(0xFF151520)
-        isRunning  -> Color(0xFF162312)
+        isRunning  -> accentBg
         else       -> Color(0xFF1E1010)
     }
     val btnFg = when {
         isPending  -> DIM
-        isRunning  -> GREEN
+        isRunning  -> accent
         isUnknown  -> MUTED
         else       -> RED
     }
@@ -531,7 +548,7 @@ fun ServiceRow(
             modifier = Modifier
                 .size(6.dp)
                 .background(
-                    if (isPending) DIM else dotColor,
+                    statusColor,
                     RoundedCornerShape(3.dp)
                 )
         )
@@ -562,18 +579,18 @@ fun ServiceRow(
                             onPending(service.id, true)
                             manager.markPending(service.id)
                             manager.togglePower(service.id, isRunning)
-                            delay(2500)
-                            // Track uptime on confirmed state transition
+                            
+                            // Faster feedback loop
+                            delay(1200)
+                            
                             val newRt       = manager.checkStatus(service)
                             val isNowRunning = newRt.status == RunStatus.RUNNING || newRt.status == RunStatus.ACTIVE
-                            when {
-                                isNowRunning && !isRunning  -> manager.recordStartTime(service.id)
-                                !isNowRunning && isRunning  -> manager.clearStartTime(service.id)
-                            }
+                            if (isNowRunning && !isRunning)  manager.recordStartTime(service.id)
+                            if (!isNowRunning && isRunning)  manager.clearStartTime(service.id)
+                            
                             manager.clearPending(service.id)
                             onPending(service.id, false)
                             onRefresh()
-                            Log.d(TAG, "ServiceRow: done for ${service.label} isNowRunning=$isNowRunning")
                         }
                     } else Modifier
                 )

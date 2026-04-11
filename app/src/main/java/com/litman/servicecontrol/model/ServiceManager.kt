@@ -64,10 +64,32 @@ data class WidgetSettings(
     val opacity: Int        = 230,
     val cornerRadius: Float = 12f,
     val fontStyle: String   = "SANS",    // SANS | MONO
-    val accentColor: String = "GREEN",   // GREEN | CYAN | AMBER
+    val theme: String       = "GRAPHITE", // GRAPHITE | SLATE | DEEP_BLUE | SOFT_GREEN | AMBER | MONO
     val showMemory: Boolean  = true,
     val showColumnHeaders: Boolean = true
 )
+
+// ── Theme definitions ────────────────────────────────────────────────────────
+
+data class AppTheme(
+    val id: String,
+    val name: String,
+    val accent: Long,
+    val accentBg: Long,
+    val isPremium: Boolean = true
+)
+
+object Themes {
+    val ALL = listOf(
+        AppTheme("GRAPHITE",   "Graphite",   0xFFBBBBC8, 0xFF1A1A22),
+        AppTheme("SLATE",      "Slate",      0xFF708090, 0xFF14191E),
+        AppTheme("DEEP_BLUE",  "Deep Blue",  0xFF336699, 0xFF0A141E),
+        AppTheme("SOFT_GREEN", "Soft Green", 0xFF66BB6A, 0xFF0E1E12),
+        AppTheme("AMBER",      "Amber Ind.", 0xFFFFB300, 0xFF1E1600),
+        AppTheme("MONO",       "Monochrome", 0xFFEEEEF5, 0xFF16161E)
+    )
+    fun find(id: String) = ALL.find { it.id == id } ?: ALL[0]
+}
 
 // ── Template registry ────────────────────────────────────────────────────────
 
@@ -141,11 +163,11 @@ class ServiceManager(val context: Context) {
                 opacity           = if (obj.has("opacity"))           obj["opacity"].asInt             else d.opacity,
                 cornerRadius      = if (obj.has("cornerRadius"))      obj["cornerRadius"].asFloat      else d.cornerRadius,
                 fontStyle         = if (obj.has("fontStyle"))         obj["fontStyle"].asString        else d.fontStyle,
-                accentColor       = if (obj.has("accentColor"))       obj["accentColor"].asString      else d.accentColor,
+                theme             = if (obj.has("theme"))             obj["theme"].asString            else if (obj.has("accentColor")) obj["accentColor"].asString else d.theme,
                 showMemory        = if (obj.has("showMemory"))        obj["showMemory"].asBoolean      else d.showMemory,
                 showColumnHeaders = if (obj.has("showColumnHeaders")) obj["showColumnHeaders"].asBoolean else d.showColumnHeaders
             )
-            Log.d(TAG, "getWidgetSettings: opacity=${s.opacity} font=${s.fontStyle} accent=${s.accentColor} nameSize=${s.nameSize}")
+            Log.d(TAG, "getWidgetSettings: opacity=${s.opacity} font=${s.fontStyle} theme=${s.theme}")
             s
         } catch (e: Exception) {
             Log.e(TAG, "getWidgetSettings: parse error, returning defaults", e)
@@ -155,9 +177,8 @@ class ServiceManager(val context: Context) {
 
     fun saveWidgetSettings(settings: WidgetSettings) {
         val json = gson.toJson(settings)
-        // commit() is synchronous — guarantees the value is readable before we push the widget
         prefs.edit().putString("widget_settings", json).commit()
-        Log.d(TAG, "saveWidgetSettings: opacity=${settings.opacity} font=${settings.fontStyle} accent=${settings.accentColor}")
+        Log.d(TAG, "saveWidgetSettings: opacity=${settings.opacity} font=${settings.fontStyle} theme=${settings.theme}")
     }
 
     // ── Pending action tracking ───────────────────────────────────────────────
@@ -283,7 +304,7 @@ class ServiceManager(val context: Context) {
         return withContext(Dispatchers.IO) {
             try {
                 Socket().use { socket ->
-                    socket.connect(InetSocketAddress("127.0.0.1", port), 1000)
+                    socket.connect(InetSocketAddress("127.0.0.1", port), 500)
                 }
                 Log.d(TAG, "checkTcpPort: port=$port → RUNNING")
                 ServiceRuntime(RunStatus.RUNNING)
@@ -359,18 +380,32 @@ class ServiceManager(val context: Context) {
             return
         }
         val item = services[idx]
+        val flagName = item.name.replace('-', '_').uppercase()
+        val stopFlagPath = "/data/data/com.termux/files/home/STOP_$flagName"
+
         Log.d(TAG, "togglePower: ${item.label} isRunning=$isRunning → ${if (isRunning) "STOP" else "START"}")
         
         if (isRunning) {
+            // STOP ACTION
             services[idx] = item.copy(isManuallyStopped = true)
             saveServices(services)
-            stopService(item)
+            
+            // 1. Create flag, 2. Kill processes
+            val killCmd = when {
+                item.port != null ->
+                    "fuser -k ${item.port}/tcp 2>/dev/null; pkill -f '${item.name}' 2>/dev/null; true"
+                item.checkMode == StatusCheckMode.PROCESS && !item.processMatch.isNullOrBlank() ->
+                    "pkill -f \"${item.processMatch}\""
+                else -> "true"
+            }
+            sendTermuxCommand(arrayOf("-c", "touch $stopFlagPath; $killCmd"))
         } else {
+            // START ACTION
             services[idx] = item.copy(isManuallyStopped = false)
             saveServices(services)
-            // Also remove the stop flag when manually starting
-            val flagName = item.name.replace('-', '_').uppercase()
-            sendTermuxCommand(arrayOf("-c", "rm -f /data/data/com.termux/files/home/STOP_$flagName; ${item.scriptPath}"))
+            
+            // 1. Remove flag, 2. Run script
+            sendTermuxCommand(arrayOf("-c", "rm -f $stopFlagPath; ${item.scriptPath}"))
         }
     }
 
