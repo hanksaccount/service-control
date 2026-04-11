@@ -23,8 +23,11 @@ data class ServiceItem(
     val id: String,
     val name: String,
     var displayName: String = "",
-    var port: Int? = null,
-    val scriptPath: String,
+    var scriptPath: String,
+    var stopFlagPath: String? = null,
+    var ports: List<Int> = emptyList(),
+    var killPatterns: List<String> = emptyList(),
+    var notificationIds: List<String> = emptyList(),
     var isEnabledOnWidget: Boolean = false,
     var type: ServiceType = ServiceType.UNKNOWN,
     var group: ServiceGroup = ServiceGroup.UNKNOWN,
@@ -38,14 +41,20 @@ data class ServiceItem(
     var isManuallyStopped: Boolean = false
 ) {
     val label: String get() = if (displayName.isNotBlank()) displayName else name
+    // For backward compatibility and status checks, we still use the first port as primary
+    val port: Int? get() = ports.firstOrNull()
 }
 
 data class ServiceTemplate(
     val name: String,
     val displayName: String,
     val type: ServiceType,
-    val defaultPort: Int? = null,
     val group: ServiceGroup,
+    val scriptName: String? = null,
+    val stopFlagPath: String? = null,
+    val ports: List<Int> = emptyList(),
+    val killPatterns: List<String> = emptyList(),
+    val notificationIds: List<String> = emptyList(),
     val checkMode: StatusCheckMode = StatusCheckMode.PORT,
     val processMatch: String? = null,
     val showInWidget: Boolean = false,
@@ -55,81 +64,61 @@ data class ServiceTemplate(
     val canStop: Boolean = true
 )
 
-// ── Widget settings ──────────────────────────────────────────────────────────
-
-data class WidgetSettings(
-    val nameSize: Float     = 13f,
-    val metaSize: Float     = 9f,
-    val padding: Float      = 12f,
-    val opacity: Int        = 230,
-    val cornerRadius: Float = 12f,
-    val fontStyle: String   = "SANS",    // SANS | MONO
-    val theme: String       = "GRAPHITE", // GRAPHITE | SLATE | DEEP_BLUE | SOFT_GREEN | AMBER | MONO
-    val showMemory: Boolean  = true,
-    val showColumnHeaders: Boolean = true
-)
-
-// ── Theme definitions ────────────────────────────────────────────────────────
-
-data class AppTheme(
-    val id: String,
-    val name: String,
-    val accent: Long,
-    val accentBg: Long,
-    val isPremium: Boolean = true
-)
-
-object Themes {
-    val ALL = listOf(
-        AppTheme("GRAPHITE",   "Graphite",   0xFFBBBBC8, 0xFF1A1A22),
-        AppTheme("SLATE",      "Slate",      0xFF708090, 0xFF14191E),
-        AppTheme("DEEP_BLUE",  "Deep Blue",  0xFF336699, 0xFF0A141E),
-        AppTheme("SOFT_GREEN", "Soft Green", 0xFF66BB6A, 0xFF0E1E12),
-        AppTheme("AMBER",      "Amber Ind.", 0xFFFFB300, 0xFF1E1600),
-        AppTheme("MONO",       "Monochrome", 0xFFEEEEF5, 0xFF16161E)
-    )
-    fun find(id: String) = ALL.find { it.id == id } ?: ALL[0]
-}
-
 // ── Template registry ────────────────────────────────────────────────────────
 
 object TemplateRegistry {
+    private const val HOME = "/data/data/com.termux/files/home"
+    
     private val templates = listOf(
         ServiceTemplate(
             name = "fuel-intel", displayName = "fuel-intel",
-            type = ServiceType.WEB_PANEL, defaultPort = 5210,
-            group = ServiceGroup.PANELS, checkMode = StatusCheckMode.PORT,
+            type = ServiceType.WEB_PANEL, group = ServiceGroup.PANELS,
+            scriptName = "fuel.sh",
+            stopFlagPath = "$HOME/STOP_FUEL_INTEL",
+            ports = listOf(5201, 5210),
+            killPatterns = listOf("fuel_service.sh", "server/index.js", "vite"),
+            notificationIds = listOf("fuel-intel"),
+            checkMode = StatusCheckMode.PORT,
             showInWidget = true, canOpen = true, openUrl = "http://127.0.0.1:5210"
         ),
         ServiceTemplate(
             name = "elpris", displayName = "elpris",
-            type = ServiceType.HYBRID, defaultPort = 5100,
-            group = ServiceGroup.PANELS, checkMode = StatusCheckMode.PORT,
+            type = ServiceType.HYBRID, group = ServiceGroup.PANELS,
+            scriptName = "elpris.sh",
+            stopFlagPath = "$HOME/STOP_ELPRIS",
+            ports = listOf(5100),
+            killPatterns = listOf("elpris_service.sh", "server.py"),
+            notificationIds = listOf("elpris"),
+            checkMode = StatusCheckMode.PORT,
             showInWidget = true, canOpen = true, openUrl = "http://127.0.0.1:5100"
         ),
         ServiceTemplate(
             name = "dashboard", displayName = "dashboard",
-            type = ServiceType.HYBRID, defaultPort = 5000,
-            group = ServiceGroup.PANELS, checkMode = StatusCheckMode.PORT,
+            type = ServiceType.HYBRID, group = ServiceGroup.PANELS,
+            scriptName = "dashboard.sh",
+            stopFlagPath = "$HOME/STOP_DASHBOARD",
+            ports = listOf(5000),
+            killPatterns = listOf("start.sh", "battery_monitor.sh"),
+            notificationIds = listOf("dashboard_pro"),
+            checkMode = StatusCheckMode.PORT,
             showInWidget = true, canOpen = true, openUrl = "http://127.0.0.1:5000"
         ),
         ServiceTemplate(
             name = "autosort", displayName = "autosort",
-            type = ServiceType.WEB_PANEL, defaultPort = 5300,
-            group = ServiceGroup.PANELS, checkMode = StatusCheckMode.PORT,
+            type = ServiceType.WEB_PANEL, group = ServiceGroup.PANELS,
+            scriptName = "autosort.sh",
+            stopFlagPath = "$HOME/STOP_AUTOSORT",
+            ports = listOf(5300),
+            killPatterns = listOf("auto_sort_service.sh", "panel-start.sh"),
+            notificationIds = listOf("autosort", "autosort-status"),
+            checkMode = StatusCheckMode.PORT,
             showInWidget = true, canOpen = true, openUrl = "http://127.0.0.1:5300"
         ),
         ServiceTemplate(
             name = "runfull", displayName = "Kör alla",
-            type = ServiceType.ACTION_SCRIPT, defaultPort = null,
-            group = ServiceGroup.ACTIONS, checkMode = StatusCheckMode.ACTION,
-            canStop = false
-        ),
-        ServiceTemplate(
-            name = "stopall", displayName = "Stoppa alla",
-            type = ServiceType.ACTION_SCRIPT, defaultPort = null,
-            group = ServiceGroup.ACTIONS, checkMode = StatusCheckMode.ACTION,
-            canStop = false
+            type = ServiceType.ACTION_SCRIPT, group = ServiceGroup.ACTIONS,
+            scriptName = "runfull.sh",
+            checkMode = StatusCheckMode.ACTION, canStop = false
         )
     )
     fun find(name: String) = templates.find { it.name == name }
@@ -144,7 +133,7 @@ class ServiceManager(val context: Context) {
     private val gson = Gson()
 
     // Bump this when buildDefaultServices() changes port/path/mode config.
-    private val SERVICES_VERSION = 3
+    private val SERVICES_VERSION = 4
 
     // ── Settings ─────────────────────────────────────────────────────────────
 
@@ -247,48 +236,31 @@ class ServiceManager(val context: Context) {
 
     private fun buildDefaultServices(): List<ServiceItem> {
         val base = "/data/data/com.termux/files/home/.shortcuts"
-        return listOf(
+        val names = listOf("fuel-intel", "elpris", "dashboard", "autosort", "runfull")
+        
+        return names.mapNotNull { name ->
+            val template = TemplateRegistry.find(name) ?: return@mapNotNull null
+            val scriptName = template.scriptName ?: "$name.sh"
             ServiceItem(
-                id = "fuel-intel", name = "fuel-intel", displayName = "fuel-intel",
-                port = 5210,
-                scriptPath = "$base/fuel.sh",
-                isEnabledOnWidget = true,
-                type = ServiceType.WEB_PANEL, group = ServiceGroup.PANELS,
-                checkMode = StatusCheckMode.PORT
-            ),
-            ServiceItem(
-                id = "elpris", name = "elpris", displayName = "elpris",
-                port = 5100,
-                scriptPath = "$base/elpris.sh",
-                isEnabledOnWidget = true,
-                type = ServiceType.HYBRID, group = ServiceGroup.PANELS,
-                checkMode = StatusCheckMode.PORT
-            ),
-            ServiceItem(
-                id = "dashboard", name = "dashboard", displayName = "dashboard",
-                port = 5000,
-                scriptPath = "$base/dashboard.sh",
-                isEnabledOnWidget = true,
-                type = ServiceType.HYBRID, group = ServiceGroup.PANELS,
-                checkMode = StatusCheckMode.PORT
-            ),
-            ServiceItem(
-                id = "autosort", name = "autosort", displayName = "autosort",
-                port = 5300,
-                scriptPath = "$base/autosort.sh",
-                isEnabledOnWidget = true,
-                type = ServiceType.WEB_PANEL, group = ServiceGroup.PANELS,
-                checkMode = StatusCheckMode.PORT
-            ),
-            ServiceItem(
-                id = "runfull", name = "runfull", displayName = "Kör alla",
-                port = null,
-                scriptPath = "$base/runfull.sh",
-                isEnabledOnWidget = false,
-                type = ServiceType.ACTION_SCRIPT, group = ServiceGroup.ACTIONS,
-                checkMode = StatusCheckMode.ACTION, canStop = false
+                id = name,
+                name = name,
+                displayName = template.displayName,
+                scriptPath = "$base/$scriptName",
+                stopFlagPath = template.stopFlagPath,
+                ports = template.ports,
+                killPatterns = template.killPatterns,
+                notificationIds = template.notificationIds,
+                isEnabledOnWidget = template.showInWidget,
+                type = template.type,
+                group = template.group,
+                checkMode = template.checkMode,
+                processMatch = template.processMatch,
+                canOpen = template.canOpen,
+                openUrl = template.openUrl,
+                canStart = template.canStart,
+                canStop = template.canStop
             )
-        )
+        }
     }
 
     // ── Status checks ─────────────────────────────────────────────────────────
@@ -344,23 +316,53 @@ class ServiceManager(val context: Context) {
         sendTermuxCommand(arrayOf(scriptPath))
     }
 
+    /**
+     * STOPS a service fully:
+     * 1. Sets STOP flag
+     * 2. Kills all associated ports
+     * 3. Kills all process patterns
+     * 4. Clears all associated termux-notifications
+     */
     fun stopService(item: ServiceItem) {
-        Log.d(TAG, "stopService: ${item.label} mode=${item.checkMode} port=${item.port}")
+        val flag = item.stopFlagPath ?: "/data/data/com.termux/files/home/STOP_${item.name.replace('-', '_').uppercase()}"
         
-        // 1. Create standard STOP flag to tell Termux background loops to exit
-        val flagName = item.name.replace('-', '_').uppercase()
-        val flagCmd = "touch /data/data/com.termux/files/home/STOP_$flagName"
-
-        // 2. Kill the process/port
-        val killCmd = when {
-            item.port != null ->
-                "fuser -k ${item.port}/tcp 2>/dev/null; pkill -f '${item.name}' 2>/dev/null; true"
-            item.checkMode == StatusCheckMode.PROCESS && !item.processMatch.isNullOrBlank() ->
-                "pkill -f \"${item.processMatch}\""
-            else -> "true"
+        val cmds = mutableListOf<String>()
+        
+        // 1. Flag
+        cmds.add("touch $flag")
+        
+        // 2. Ports
+        item.ports.forEach { port ->
+            cmds.add("fuser -k $port/tcp 2>/dev/null || true")
         }
         
-        sendTermuxCommand(arrayOf("-c", "$flagCmd; $killCmd"))
+        // 3. Process patterns
+        item.killPatterns.forEach { pattern ->
+            cmds.add("pkill -f \"$pattern\" 2>/dev/null || true")
+        }
+        
+        // 4. Notifications
+        item.notificationIds.forEach { nid ->
+            cmds.add("termux-notification --remove \"$nid\" 2>/dev/null || true")
+        }
+
+        val fullCmd = cmds.joinToString("; ")
+        Log.d(TAG, "STOP ACTION: ${item.label}\n  Flag: $flag\n  Ports: ${item.ports}\n  Patterns: ${item.killPatterns}\n  Notifs: ${item.notificationIds}")
+        sendTermuxCommand(arrayOf("-c", fullCmd))
+    }
+
+    /**
+     * STARTS a service fully:
+     * 1. Removes STOP flag
+     * 2. Runs start script
+     */
+    fun startService(item: ServiceItem) {
+        val flag = item.stopFlagPath ?: "/data/data/com.termux/files/home/STOP_${item.name.replace('-', '_').uppercase()}"
+        
+        Log.d(TAG, "START ACTION: ${item.label}\n  Remove Flag: $flag\n  Script: ${item.scriptPath}")
+        
+        val fullCmd = "rm -f $flag; ${item.scriptPath}"
+        sendTermuxCommand(arrayOf("-c", fullCmd))
     }
 
     fun toggleMute(serviceId: String) {
@@ -380,32 +382,16 @@ class ServiceManager(val context: Context) {
             return
         }
         val item = services[idx]
-        val flagName = item.name.replace('-', '_').uppercase()
-        val stopFlagPath = "/data/data/com.termux/files/home/STOP_$flagName"
-
         Log.d(TAG, "togglePower: ${item.label} isRunning=$isRunning → ${if (isRunning) "STOP" else "START"}")
         
         if (isRunning) {
-            // STOP ACTION
             services[idx] = item.copy(isManuallyStopped = true)
             saveServices(services)
-            
-            // 1. Create flag, 2. Kill processes
-            val killCmd = when {
-                item.port != null ->
-                    "fuser -k ${item.port}/tcp 2>/dev/null; pkill -f '${item.name}' 2>/dev/null; true"
-                item.checkMode == StatusCheckMode.PROCESS && !item.processMatch.isNullOrBlank() ->
-                    "pkill -f \"${item.processMatch}\""
-                else -> "true"
-            }
-            sendTermuxCommand(arrayOf("-c", "touch $stopFlagPath; $killCmd"))
+            stopService(item)
         } else {
-            // START ACTION
             services[idx] = item.copy(isManuallyStopped = false)
             saveServices(services)
-            
-            // 1. Remove flag, 2. Run script
-            sendTermuxCommand(arrayOf("-c", "rm -f $stopFlagPath; ${item.scriptPath}"))
+            startService(item)
         }
     }
 
