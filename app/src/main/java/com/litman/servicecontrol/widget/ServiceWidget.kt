@@ -74,10 +74,11 @@ class ServiceWidget : GlanceAppWidget() {
         }
         Log.d(TAG, "provideGlance: ${services.size} widget services")
 
-        // Parallel TCP checks — all 4 services in ~1 s instead of ~4 s sequential
-        val runtimes    = manager.checkAllStatuses(services)
-        val activeCount = runtimes.values.count {
-            it.status == RunStatus.RUNNING || it.status == RunStatus.ACTIVE
+        // Use cached statuses for instant visual updates instead of blocking on network IO
+        val runtimes    = manager.getCachedStatuses()
+        val activeCount = services.count { service ->
+            val rt = runtimes[service.id]
+            rt != null && (rt.status == RunStatus.RUNNING || rt.status == RunStatus.ACTIVE)
         }
         val pending = services.associate { it.id to manager.isPending(it.id) }
         // Uptime per running service (null when unknown or not tracked)

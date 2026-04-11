@@ -34,7 +34,8 @@ data class ServiceItem(
     var openUrl: String? = null,
     var canStart: Boolean = true,
     var canStop: Boolean = true,
-    var isMuted: Boolean = false
+    var isMuted: Boolean = false,
+    var isManuallyStopped: Boolean = false
 ) {
     val label: String get() = if (displayName.isNotBlank()) displayName else name
 }
@@ -213,7 +214,7 @@ class ServiceManager(val context: Context) {
         val updated = buildDefaultServices().map { default ->
             val current = existingById[default.id]
             if (current != null) {
-                default.copy(isMuted = current.isMuted, isEnabledOnWidget = current.isEnabledOnWidget)
+                default.copy(isMuted = current.isMuted, isEnabledOnWidget = current.isEnabledOnWidget, isManuallyStopped = current.isManuallyStopped)
             } else {
                 default
             }
@@ -324,13 +325,21 @@ class ServiceManager(val context: Context) {
 
     fun stopService(item: ServiceItem) {
         Log.d(TAG, "stopService: ${item.label} mode=${item.checkMode} port=${item.port}")
-        when {
+        
+        // 1. Create standard STOP flag to tell Termux background loops to exit
+        val flagName = item.name.replace('-', '_').uppercase()
+        val flagCmd = "touch /data/data/com.termux/files/home/STOP_$flagName"
+
+        // 2. Kill the process/port
+        val killCmd = when {
             item.port != null ->
-                // Kill by port — works for both PORT and HYBRID services
-                sendTermuxCommand(arrayOf("-c", "fuser -k ${item.port}/tcp 2>/dev/null; pkill -f '${item.name}' 2>/dev/null; true"))
+                "fuser -k ${item.port}/tcp 2>/dev/null; pkill -f '${item.name}' 2>/dev/null; true"
             item.checkMode == StatusCheckMode.PROCESS && !item.processMatch.isNullOrBlank() ->
-                sendTermuxCommand(arrayOf("-c", "pkill -f \"${item.processMatch}\""))
+                "pkill -f \"${item.processMatch}\""
+            else -> "true"
         }
+        
+        sendTermuxCommand(arrayOf("-c", "$flagCmd; $killCmd"))
     }
 
     fun toggleMute(serviceId: String) {
@@ -343,12 +352,60 @@ class ServiceManager(val context: Context) {
     }
 
     fun togglePower(serviceId: String, isRunning: Boolean) {
-        val item = getSavedServices().find { it.id == serviceId } ?: run {
+        val services = getSavedServices().toMutableList()
+        val idx = services.indexOfFirst { it.id == serviceId }
+        if (idx == -1) {
             Log.w(TAG, "togglePower: service not found: $serviceId")
             return
         }
+        val item = services[idx]
         Log.d(TAG, "togglePower: ${item.label} isRunning=$isRunning → ${if (isRunning) "STOP" else "START"}")
-        if (isRunning) stopService(item) else runTermuxScript(item.scriptPath)
+        
+        if (isRunning) {
+            services[idx] = item.copy(isManuallyStopped = true)
+            saveServices(services)
+            stopService(item)
+        } else {
+            services[idx] = item.copy(isManuallyStopped = false)
+            saveServices(services)
+            // Also remove the stop flag when manually starting
+            val flagName = item.name.replace('-', '_').uppercase()
+            sendTermuxCommand(arrayOf("-c", "rm -f /data/data/com.termux/files/home/STOP_$flagName; ${item.scriptPath}"))
+        }
+    }
+
+    fun startAllEligible() {
+        Log.d(TAG, "startAllEligible: Starting all non-manually stopped services")
+        
+        val services = getSavedServices()
+        for (item in services) {
+            if (item.type == ServiceType.ACTION_SCRIPT) continue
+            if (item.isManuallyStopped) {
+                Log.d(TAG, "startAllEligible: skipping ${item.label} (manually stopped)")
+                continue
+            }
+            Log.d(TAG, "startAllEligible: starting ${item.label}")
+            val flagName = item.name.replace('-', '_').uppercase()
+            sendTermuxCommand(arrayOf("-c", "rm -f /data/data/com.termux/files/home/STOP_$flagName; ${item.scriptPath}"))
+        }
+        sendTermuxCommand(arrayOf("-c", "termux-toast \"Native app-start slutförd\""))
+    }
+
+    fun stopAll() {
+        Log.d(TAG, "stopAll: Stopping all services")
+        
+        val services = getSavedServices().toMutableList()
+        var changed = false
+        for (i in services.indices) {
+            val item = services[i]
+            if (item.type == ServiceType.ACTION_SCRIPT) continue
+            
+            services[i] = item.copy(isManuallyStopped = true)
+            changed = true
+            stopService(item)
+        }
+        if (changed) saveServices(services)
+        sendTermuxCommand(arrayOf("-c", "termux-toast \"Alla tjänster stoppade\""))
     }
 
     private fun sendTermuxCommand(args: Array<String>) {
@@ -371,10 +428,26 @@ class ServiceManager(val context: Context) {
     /** Check all services in parallel — much faster than sequential when some are offline. */
     suspend fun checkAllStatuses(services: List<ServiceItem>): Map<String, ServiceRuntime> =
         coroutineScope {
-            services.map { service ->
+            val results = services.map { service ->
                 async { service.id to checkStatus(service) }
             }.awaitAll().toMap()
+            saveCachedStatuses(results)
+            results
         }
+
+    fun getCachedStatuses(): Map<String, ServiceRuntime> {
+        val json = prefs.getString("cached_statuses", null) ?: return emptyMap()
+        return try {
+            val type = object : TypeToken<Map<String, ServiceRuntime>>() {}.type
+            gson.fromJson(json, type) ?: emptyMap()
+        } catch (e: Exception) {
+            emptyMap()
+        }
+    }
+
+    private fun saveCachedStatuses(statuses: Map<String, ServiceRuntime>) {
+        prefs.edit().putString("cached_statuses", gson.toJson(statuses)).apply()
+    }
 
     // ── Uptime tracking ───────────────────────────────────────────────────────
     // Called when we confirm a service transitioned STOPPED → RUNNING.

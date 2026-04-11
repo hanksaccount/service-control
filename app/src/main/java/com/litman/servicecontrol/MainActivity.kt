@@ -597,7 +597,13 @@ fun ActionRow(action: ServiceItem, manager: ServiceManager, onRefresh: () -> Uni
             .fillMaxWidth()
             .clickable {
                 Log.d(TAG, "ActionRow: running ${action.label}")
-                manager.runTermuxScript(action.scriptPath)
+                if (action.id == "runfull") {
+                    manager.startAllEligible()
+                } else if (action.id == "stopall") {
+                    manager.stopAll()
+                } else {
+                    manager.runTermuxScript(action.scriptPath)
+                }
                 onRefresh()
             }
             .padding(vertical = 10.dp),
