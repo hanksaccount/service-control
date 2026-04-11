@@ -1,6 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Shortcut Board</string>
-    <string name="widget_name">Shortcut Board</string>
-    <string name="widget_description">Scrollable list of shortcuts</string>
-    <string name="widget_compact_description">Compact horizontal shortcut board</string>
+    <string name="app_name">Service Control</string>
+    <string name="widget_name">Service Control</string>
+    <string name="widget_description">Local service monitor and control panel for Termux / PM2</string>
 </resources>
