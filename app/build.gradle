@@ -54,9 +54,6 @@ dependencies {
     implementation "androidx.glance:glance-appwidget:1.0.0"
     implementation "androidx.glance:glance-material3:1.0.0"
 
-    // Ktor (För status-polling)
-    implementation "io.ktor:ktor-client-android:2.3.7"
-
     // Gson (För JSON-serialisering)
     implementation 'com.google.code.gson:gson:2.10.1'
 }

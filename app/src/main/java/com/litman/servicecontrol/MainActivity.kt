@@ -54,7 +54,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         manager = ServiceManager(this)
-        manager.seedDefaultServicesIfEmpty()
+        manager.ensureServiceConfig()
 
         setContent {
             MaterialTheme(colorScheme = darkColorScheme(background = BG)) {

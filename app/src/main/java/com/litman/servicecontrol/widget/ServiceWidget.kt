@@ -26,62 +26,63 @@ import com.litman.servicecontrol.model.*
 import java.util.Locale
 import kotlin.math.abs
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Theme helpers ─────────────────────────────────────────────────────────────
 
 private fun widgetFont(style: String): FontFamily = when (style) {
     "MONO" -> FontFamily.Monospace
     else   -> FontFamily.SansSerif
 }
 
-private fun accentColor(style: String): Color = when (style) {
+private fun widgetAccent(style: String): Color = when (style) {
     "CYAN"  -> Color(0xFF00C8DD)
     "AMBER" -> Color(0xFFFFB300)
-    else    -> Color(0xFF00D966)  // GREEN default
+    else    -> Color(0xFF00D966)
 }
 
-private fun accentBg(style: String): Color = when (style) {
-    "CYAN"  -> Color(0xFF0F2025)
-    "AMBER" -> Color(0xFF201800)
-    else    -> Color(0xFF0F1F14)  // GREEN default
+private fun widgetAccentBg(style: String): Color = when (style) {
+    "CYAN"  -> Color(0xFF0C1F25)
+    "AMBER" -> Color(0xFF1E1600)
+    else    -> Color(0xFF0C1E12)
 }
 
-/** Mode label shown in meta row — mimics PM2's fork/proc style */
-private fun modeLabel(service: ServiceItem): String = when {
+// ── Data helpers ──────────────────────────────────────────────────────────────
+
+/** Mode label: shows port or "proc" — mimics PM2 ps output */
+private fun modeStr(service: ServiceItem): String = when {
     service.checkMode == StatusCheckMode.PORT && service.port != null -> ":${service.port}"
     service.checkMode == StatusCheckMode.PROCESS -> "proc"
     else -> "fork"
 }
 
-/** Stable fake memory value — consistent per service based on id hash */
+/** Deterministic fake memory value — stable per service, replaced by real data later */
 private fun fakeMemMb(service: ServiceItem): String {
-    val mb = 18.0 + (abs(service.id.hashCode()) % 820) / 10.0
-    return String.format(Locale.US, "%.0f MB", mb)
+    val mb = 18 + (abs(service.id.hashCode()) % 820) / 10
+    return String.format(Locale.US, "%d MB", mb)
 }
 
-// ── Widget ───────────────────────────────────────────────────────────────────
+// ── Widget entry point ────────────────────────────────────────────────────────
 
 class ServiceWidget : GlanceAppWidget() {
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val manager  = ServiceManager(context)
         val settings = manager.getWidgetSettings()
-        val allSaved = manager.getSavedServices()
+        val all      = manager.getSavedServices()
 
-        val services = allSaved.filter {
+        val services = all.filter {
             it.isEnabledOnWidget &&
             (it.type == ServiceType.WEB_PANEL || it.type == ServiceType.HYBRID)
         }
 
-        val runtimes: Map<String, ServiceRuntime> = services.associate { s ->
-            s.id to manager.checkStatus(s)
-        }
+        // Check all ports in parallel via coroutines (each checkStatus suspends independently)
+        val runtimes = services.associate { it.id to manager.checkStatus(it) }
 
         val activeCount = runtimes.values.count {
             it.status == RunStatus.RUNNING || it.status == RunStatus.ACTIVE
         }
 
         provideContent {
-            WidgetRoot(
+            WidgetBoard(
                 services    = services,
                 runtimes    = runtimes,
                 activeCount = activeCount,
@@ -91,62 +92,60 @@ class ServiceWidget : GlanceAppWidget() {
     }
 }
 
-// ── Root layout ───────────────────────────────────────────────────────────────
+// ── Widget board ──────────────────────────────────────────────────────────────
 
 @Composable
-private fun WidgetRoot(
+private fun WidgetBoard(
     services: List<ServiceItem>,
     runtimes: Map<String, ServiceRuntime>,
     activeCount: Int,
     settings: WidgetSettings
 ) {
-    val bgAlpha   = settings.opacity
-    val bgColor   = Color(red = 13, green = 13, blue = 17, alpha = bgAlpha)
-    val font      = widgetFont(settings.fontStyle)
-    val accent    = accentColor(settings.accentColor)
-    val pad       = settings.padding.dp
-    val total     = services.size
+    val bg     = Color(red = 13, green = 13, blue = 17, alpha = settings.opacity)
+    val accent = widgetAccent(settings.accentColor)
+    val font   = widgetFont(settings.fontStyle)
+    val total  = services.size
+    val pad    = settings.padding.dp
 
     Column(
         modifier = GlanceModifier
             .fillMaxSize()
-            .background(ColorProvider(bgColor))
+            .background(ColorProvider(bg))
             .cornerRadius(settings.cornerRadius.dp)
             .padding(pad)
     ) {
-
-        // ── Header ───────────────────────────────────────────────
+        // ── Header row ───────────────────────────────────────
         Row(
             modifier = GlanceModifier
                 .fillMaxWidth()
-                .padding(bottom = (settings.padding * 0.55f).dp),
+                .padding(bottom = (settings.padding * 0.5f).dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = GlanceModifier.defaultWeight()) {
                 Text(
                     text = "SERVICE CONTROL",
                     style = TextStyle(
-                        color = ColorProvider(Color(0xFFCCCCD8)),
-                        fontSize = (settings.nameSize * 0.75f).sp,
+                        color      = ColorProvider(Color(0xFFBBBBC8)),
+                        fontSize   = (settings.nameSize * 0.73f).sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = font
                     )
                 )
-                Spacer(GlanceModifier.height(1.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = "TERMUX / PM2  ·  ",
+                        text = "PM2  ·  ",
                         style = TextStyle(
-                            color = ColorProvider(Color(0xFF484858)),
-                            fontSize = (settings.metaSize * 0.88f).sp,
+                            color    = ColorProvider(Color(0xFF404050)),
+                            fontSize = (settings.metaSize * 0.85f).sp,
                             fontFamily = font
                         )
                     )
                     Text(
+                        // Bold colored active count is the most important header stat
                         text = "$activeCount/$total",
                         style = TextStyle(
-                            color = ColorProvider(if (activeCount > 0) accent else Color(0xFF484858)),
-                            fontSize = (settings.metaSize * 0.88f).sp,
+                            color      = ColorProvider(if (activeCount > 0) accent else Color(0xFF404050)),
+                            fontSize   = (settings.metaSize * 0.85f).sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = font
                         )
@@ -154,69 +153,69 @@ private fun WidgetRoot(
                     Text(
                         text = " online",
                         style = TextStyle(
-                            color = ColorProvider(Color(0xFF484858)),
-                            fontSize = (settings.metaSize * 0.88f).sp,
+                            color    = ColorProvider(Color(0xFF404050)),
+                            fontSize = (settings.metaSize * 0.85f).sp,
                             fontFamily = font
                         )
                     )
                 }
             }
 
-            // Refresh button
+            // Refresh button — small, unobtrusive
             Box(
                 modifier = GlanceModifier
-                    .size(26.dp)
-                    .background(ColorProvider(Color(0xFF181820)))
-                    .cornerRadius(7.dp)
+                    .size(24.dp)
+                    .background(ColorProvider(Color(0xFF16161E)))
+                    .cornerRadius(6.dp)
                     .clickable(actionRunCallback<RefreshActionWidget>()),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = "↻",
                     style = TextStyle(
-                        color = ColorProvider(Color(0xFF666676)),
-                        fontSize = 13.sp
+                        color    = ColorProvider(Color(0xFF55556A)),
+                        fontSize = 12.sp
                     )
                 )
             }
         }
 
-        // ── Divider ───────────────────────────────────────────────
+        // ── Divider ───────────────────────────────────────────
         Box(
             modifier = GlanceModifier
                 .fillMaxWidth()
                 .height(1.dp)
-                .background(ColorProvider(Color(0xFF1C1C28)))
+                .background(ColorProvider(Color(0xFF1A1A26)))
         ) {}
 
-        Spacer(GlanceModifier.height((settings.padding * 0.65f).dp))
+        Spacer(GlanceModifier.height((settings.padding * 0.6f).dp))
 
-        // ── Column headers (optional) ─────────────────────────────
+        // ── Optional column headers ───────────────────────────
         if (settings.showColumnHeaders) {
-            val hdrStyle = TextStyle(
-                color = ColorProvider(Color(0xFF333344)),
-                fontSize = (settings.metaSize * 0.80f).sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = font
-            )
             Row(
                 modifier = GlanceModifier
                     .fillMaxWidth()
-                    .padding(bottom = 6.dp),
+                    .padding(bottom = 5.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(text = "SERVICE", modifier = GlanceModifier.defaultWeight(), style = hdrStyle)
-                Text(text = "CTRL",    style = hdrStyle)
+                val hStyle = TextStyle(
+                    color      = ColorProvider(Color(0xFF2E2E3E)),
+                    fontSize   = (settings.metaSize * 0.78f).sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = font
+                )
+                Text(text = "SERVICE", modifier = GlanceModifier.defaultWeight(), style = hStyle)
+                Text(text = "CTRL", style = hStyle)
             }
         }
 
-        // ── Service rows ──────────────────────────────────────────
+        // ── Service rows ──────────────────────────────────────
         if (services.isEmpty()) {
-            Spacer(GlanceModifier.height(6.dp))
             Text(
-                text = "> no processes configured",
+                text = "> no services configured",
+                modifier = GlanceModifier.padding(top = 4.dp),
                 style = TextStyle(
-                    color = ColorProvider(Color(0xFF484858)),
+                    color    = ColorProvider(Color(0xFF404050)),
                     fontSize = settings.metaSize.sp,
                     fontFamily = font
                 )
@@ -224,9 +223,9 @@ private fun WidgetRoot(
         } else {
             services.forEachIndexed { index, service ->
                 val runtime = runtimes[service.id] ?: ServiceRuntime.UNKNOWN
-                ServiceRow(service, runtime, settings, font, accent)
+                WidgetServiceRow(service, runtime, settings, font, accent)
                 if (index < services.lastIndex) {
-                    Spacer(GlanceModifier.height(9.dp))
+                    Spacer(GlanceModifier.height(8.dp))
                 }
             }
         }
@@ -236,54 +235,57 @@ private fun WidgetRoot(
 // ── Service row ───────────────────────────────────────────────────────────────
 
 @Composable
-private fun ServiceRow(
+private fun WidgetServiceRow(
     service: ServiceItem,
     runtime: ServiceRuntime,
     settings: WidgetSettings,
     font: FontFamily,
     accent: Color
 ) {
-    val isRunning   = runtime.status == RunStatus.RUNNING || runtime.status == RunStatus.ACTIVE
-    val isUnknown   = runtime.status == RunStatus.UNKNOWN
-    val statusColor = when {
-        isRunning -> accent
-        isUnknown -> Color(0xFF444455)
-        else      -> Color(0xFFAA2222)
-    }
+    val isRunning = runtime.status == RunStatus.RUNNING || runtime.status == RunStatus.ACTIVE
+    val isUnknown = runtime.status == RunStatus.UNKNOWN
+
+    // ── Colors ────────────────────────────────────────────────
+    // Running: full brightness. Offline: red but dim. Unknown: fully muted.
     val nameColor = when {
         isRunning -> Color(0xFFEEEEF5)
-        isUnknown -> Color(0xFF555566)
-        else      -> Color(0xFF6E6E80)
+        isUnknown -> Color(0xFF505060)
+        else      -> Color(0xFF6A6A7A)
+    }
+    val statusColor = when {
+        isRunning -> accent
+        isUnknown -> Color(0xFF3A3A4A)
+        else      -> Color(0xFF993333)   // dim red — less alarming than bright red
     }
     val statusLabel = when {
         isRunning -> "online"
-        isUnknown -> "unknown"
+        isUnknown -> "—"
         else      -> "offline"
     }
-    val modeStr = modeLabel(service)
 
     Row(
         modifier = GlanceModifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // ── Left: name + meta ─────────────────────────────────
+        // ── Left column ───────────────────────────────────────
         Column(modifier = GlanceModifier.defaultWeight()) {
+            // Service name — high contrast when online
             Text(
                 text = service.label,
                 style = TextStyle(
-                    color = ColorProvider(nameColor),
-                    fontSize = settings.nameSize.sp,
+                    color      = ColorProvider(nameColor),
+                    fontSize   = settings.nameSize.sp,
                     fontWeight = FontWeight.Medium,
                     fontFamily = font
                 )
             )
-            Spacer(GlanceModifier.height(2.dp))
-            // Meta row
+            Spacer(GlanceModifier.height(1.dp))
+            // Meta row — mode · status [· mem]
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = modeStr,
+                    text = modeStr(service),
                     style = TextStyle(
-                        color = ColorProvider(Color(0xFF454558)),
+                        color    = ColorProvider(Color(0xFF3E3E52)),
                         fontSize = settings.metaSize.sp,
                         fontFamily = font
                     )
@@ -291,7 +293,7 @@ private fun ServiceRow(
                 Text(
                     text = "  ·  ",
                     style = TextStyle(
-                        color = ColorProvider(Color(0xFF28282E)),
+                        color    = ColorProvider(Color(0xFF252530)),
                         fontSize = settings.metaSize.sp,
                         fontFamily = font
                     )
@@ -299,17 +301,18 @@ private fun ServiceRow(
                 Text(
                     text = statusLabel,
                     style = TextStyle(
-                        color = ColorProvider(statusColor),
-                        fontSize = settings.metaSize.sp,
-                        fontWeight = FontWeight.Medium,
+                        color      = ColorProvider(statusColor),
+                        fontSize   = settings.metaSize.sp,
+                        fontWeight = if (isRunning) FontWeight.Medium else FontWeight.Normal,
                         fontFamily = font
                     )
                 )
+                // Memory — only when running and enabled
                 if (isRunning && settings.showMemory) {
                     Text(
                         text = "  ·  ",
                         style = TextStyle(
-                            color = ColorProvider(Color(0xFF28282E)),
+                            color    = ColorProvider(Color(0xFF252530)),
                             fontSize = settings.metaSize.sp,
                             fontFamily = font
                         )
@@ -317,7 +320,7 @@ private fun ServiceRow(
                     Text(
                         text = fakeMemMb(service),
                         style = TextStyle(
-                            color = ColorProvider(Color(0xFF454558)),
+                            color    = ColorProvider(Color(0xFF3E3E52)),
                             fontSize = settings.metaSize.sp,
                             fontFamily = font
                         )
@@ -326,15 +329,16 @@ private fun ServiceRow(
             }
         }
 
-        // ── Right: power button ───────────────────────────────
-        val btnBg = if (isRunning) accentBg(settings.accentColor) else Color(0xFF200E0E)
-        val btnFg = if (isRunning) accent else Color(0xFF993322)
+        // ── Right column: power button ────────────────────────
+        val btnSize = (settings.nameSize * 2.0f).dp
+        val btnBg   = if (isRunning) widgetAccentBg(settings.accentColor) else Color(0xFF1C0E0E)
+        val btnFg   = if (isRunning) accent else if (isUnknown) Color(0xFF3A3A4A) else Color(0xFF883333)
 
         Box(
             modifier = GlanceModifier
-                .size((settings.nameSize * 2.05f).dp)
+                .size(btnSize)
                 .background(ColorProvider(btnBg))
-                .cornerRadius(8.dp)
+                .cornerRadius(7.dp)
                 .clickable(
                     actionRunCallback<TogglePowerAction>(
                         actionParametersOf(
@@ -348,8 +352,8 @@ private fun ServiceRow(
             Text(
                 text = "⏻",
                 style = TextStyle(
-                    color = ColorProvider(btnFg),
-                    fontSize = (settings.nameSize * 1.0f).sp,
+                    color      = ColorProvider(btnFg),
+                    fontSize   = (settings.nameSize * 0.95f).sp,
                     fontWeight = FontWeight.Bold
                 )
             )

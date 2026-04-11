@@ -6,12 +6,10 @@ import android.content.SharedPreferences
 import com.google.gson.Gson
 import com.google.gson.JsonParser
 import com.google.gson.reflect.TypeToken
-import io.ktor.client.*
-import io.ktor.client.engine.android.*
-import io.ktor.client.request.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
+import java.net.InetSocketAddress
+import java.net.Socket
 
 // ── Domain models ────────────────────────────────────────────────────────────
 
@@ -53,14 +51,14 @@ data class ServiceTemplate(
 // ── Widget settings ──────────────────────────────────────────────────────────
 
 data class WidgetSettings(
-    val nameSize: Float    = 13f,
-    val metaSize: Float    = 9f,
-    val padding: Float     = 12f,
-    val opacity: Int       = 230,
+    val nameSize: Float     = 13f,
+    val metaSize: Float     = 9f,
+    val padding: Float      = 12f,
+    val opacity: Int        = 230,
     val cornerRadius: Float = 12f,
-    val fontStyle: String  = "SANS",    // SANS | MONO
-    val accentColor: String = "GREEN",  // GREEN | CYAN | AMBER
-    val showMemory: Boolean = true,
+    val fontStyle: String   = "SANS",    // SANS | MONO
+    val accentColor: String = "GREEN",   // GREEN | CYAN | AMBER
+    val showMemory: Boolean  = true,
     val showColumnHeaders: Boolean = true
 )
 
@@ -70,9 +68,9 @@ object TemplateRegistry {
     private val templates = listOf(
         ServiceTemplate(
             name = "fuel-intel", displayName = "fuel-intel",
-            type = ServiceType.WEB_PANEL, defaultPort = 5200,
+            type = ServiceType.WEB_PANEL, defaultPort = 5210,
             group = ServiceGroup.PANELS, checkMode = StatusCheckMode.PORT,
-            showInWidget = true, canOpen = true, openUrl = "http://127.0.0.1:5200"
+            showInWidget = true, canOpen = true, openUrl = "http://127.0.0.1:5210"
         ),
         ServiceTemplate(
             name = "elpris", displayName = "elpris",
@@ -82,9 +80,9 @@ object TemplateRegistry {
         ),
         ServiceTemplate(
             name = "dashboard", displayName = "dashboard",
-            type = ServiceType.HYBRID, defaultPort = null,
-            group = ServiceGroup.PANELS, checkMode = StatusCheckMode.PROCESS,
-            processMatch = "dashboard", showInWidget = true, canOpen = true
+            type = ServiceType.HYBRID, defaultPort = 5000,
+            group = ServiceGroup.PANELS, checkMode = StatusCheckMode.PORT,
+            showInWidget = true, canOpen = true, openUrl = "http://127.0.0.1:5000"
         ),
         ServiceTemplate(
             name = "autosort", displayName = "autosort",
@@ -107,7 +105,6 @@ object TemplateRegistry {
     )
 
     fun find(name: String) = templates.find { it.name == name }
-    fun allPanelDefaults() = templates.filter { it.showInWidget }
 }
 
 // ── Service manager ──────────────────────────────────────────────────────────
@@ -117,20 +114,15 @@ class ServiceManager(val context: Context) {
     private val prefs: SharedPreferences =
         context.getSharedPreferences("services_config", Context.MODE_PRIVATE)
     private val gson = Gson()
-    private val client = HttpClient(Android) {
-        engine {
-            connectTimeout = 1500
-            socketTimeout  = 1500
-        }
-    }
+
+    // Version must be incremented whenever seed port/path data changes.
+    private val SERVICES_VERSION = 3
 
     // ── Settings ─────────────────────────────────────────────────────────────
 
     fun getWidgetSettings(): WidgetSettings {
         val json = prefs.getString("widget_settings", null) ?: return WidgetSettings()
         return try {
-            // Use explicit JsonObject parsing so that new Boolean/String fields
-            // correctly fall back to Kotlin defaults rather than Gson's Java defaults.
             val d   = WidgetSettings()
             val obj = JsonParser.parseString(json).asJsonObject
             WidgetSettings(
@@ -159,7 +151,7 @@ class ServiceManager(val context: Context) {
         val json = prefs.getString("services_list", null) ?: return emptyList()
         return try {
             val type = object : TypeToken<List<ServiceItem>>() {}.type
-            gson.fromJson(json, type) ?: emptyList()
+            gson.fromJson<List<ServiceItem>>(json, type) ?: emptyList()
         } catch (e: Exception) {
             emptyList()
         }
@@ -169,123 +161,133 @@ class ServiceManager(val context: Context) {
         prefs.edit().putString("services_list", gson.toJson(services)).apply()
     }
 
-    /** Pre-populate with known services on first launch. */
-    fun seedDefaultServicesIfEmpty() {
-        if (getSavedServices().isNotEmpty()) return
+    /**
+     * Ensures services are seeded with correct current config.
+     * Runs on every launch but only touches config when the SERVICES_VERSION bumps.
+     * User preferences (isMuted, isEnabledOnWidget) are preserved across migrations.
+     */
+    fun ensureServiceConfig() {
+        val savedVersion = prefs.getInt("services_config_version", 0)
+        val existing     = getSavedServices()
+
+        if (existing.isNotEmpty() && savedVersion >= SERVICES_VERSION) return
+
+        val existingById = existing.associateBy { it.id }
+        val updated = buildDefaultServices().map { default ->
+            val current = existingById[default.id]
+            if (current != null) {
+                // Migrate: keep user prefs, overwrite technical config
+                default.copy(
+                    isMuted          = current.isMuted,
+                    isEnabledOnWidget = current.isEnabledOnWidget
+                )
+            } else {
+                default
+            }
+        }
+
+        saveServices(updated)
+        prefs.edit().putInt("services_config_version", SERVICES_VERSION).apply()
+    }
+
+    private fun buildDefaultServices(): List<ServiceItem> {
         val base = "/data/data/com.termux/files/home/.shortcuts"
-        val defaults = listOf(
+        return listOf(
             ServiceItem(
                 id = "fuel-intel", name = "fuel-intel", displayName = "fuel-intel",
-                port = 5200, scriptPath = "$base/fuel-intel.sh",
-                isEnabledOnWidget = true, type = ServiceType.WEB_PANEL,
-                group = ServiceGroup.PANELS, checkMode = StatusCheckMode.PORT
+                port = 5210,
+                scriptPath = "$base/fuel.sh",       // ← shortcut is fuel.sh not fuel-intel.sh
+                isEnabledOnWidget = true,
+                type = ServiceType.WEB_PANEL, group = ServiceGroup.PANELS,
+                checkMode = StatusCheckMode.PORT
             ),
             ServiceItem(
                 id = "elpris", name = "elpris", displayName = "elpris",
-                port = 5100, scriptPath = "$base/elpris.sh",
-                isEnabledOnWidget = true, type = ServiceType.HYBRID,
-                group = ServiceGroup.PANELS, checkMode = StatusCheckMode.PORT
+                port = 5100,
+                scriptPath = "$base/elpris.sh",
+                isEnabledOnWidget = true,
+                type = ServiceType.HYBRID, group = ServiceGroup.PANELS,
+                checkMode = StatusCheckMode.PORT
             ),
             ServiceItem(
                 id = "dashboard", name = "dashboard", displayName = "dashboard",
-                port = null, scriptPath = "$base/dashboard.sh",
-                isEnabledOnWidget = true, type = ServiceType.HYBRID,
-                group = ServiceGroup.PANELS, checkMode = StatusCheckMode.PROCESS,
-                processMatch = "dashboard"
+                port = 5000,                        // ← was PROCESS mode with no port; correct port is 5000
+                scriptPath = "$base/dashboard.sh",
+                isEnabledOnWidget = true,
+                type = ServiceType.HYBRID, group = ServiceGroup.PANELS,
+                checkMode = StatusCheckMode.PORT    // ← switched from PROCESS to PORT
             ),
             ServiceItem(
                 id = "autosort", name = "autosort", displayName = "autosort",
-                port = 5300, scriptPath = "$base/autosort.sh",
-                isEnabledOnWidget = true, type = ServiceType.WEB_PANEL,
-                group = ServiceGroup.PANELS, checkMode = StatusCheckMode.PORT
+                port = 5300,
+                scriptPath = "$base/autosort.sh",
+                isEnabledOnWidget = true,
+                type = ServiceType.WEB_PANEL, group = ServiceGroup.PANELS,
+                checkMode = StatusCheckMode.PORT
             ),
             ServiceItem(
                 id = "runfull", name = "runfull", displayName = "Kör alla",
-                port = null, scriptPath = "$base/runfull.sh",
-                isEnabledOnWidget = false, type = ServiceType.ACTION_SCRIPT,
-                group = ServiceGroup.ACTIONS, checkMode = StatusCheckMode.ACTION,
-                canStop = false
+                port = null,
+                scriptPath = "$base/runfull.sh",
+                isEnabledOnWidget = false,
+                type = ServiceType.ACTION_SCRIPT, group = ServiceGroup.ACTIONS,
+                checkMode = StatusCheckMode.ACTION, canStop = false
             )
         )
-        saveServices(defaults)
-    }
-
-    /** Merge scan results from `.sh` script paths into the saved list. */
-    fun parseScanResult(stdout: String): List<ServiceItem> {
-        val lines   = stdout.lines().map { it.trim() }.filter { it.endsWith(".sh") }
-        val current = getSavedServices().toMutableList()
-
-        lines.forEach { path ->
-            val name     = path.substringAfterLast("/").removeSuffix(".sh")
-            val template = TemplateRegistry.find(name)
-            val existing = current.indexOfFirst { it.scriptPath == path }
-
-            if (existing == -1) {
-                val item = if (template != null) {
-                    ServiceItem(
-                        id = path.hashCode().toString(), name = name,
-                        displayName = template.displayName, port = template.defaultPort,
-                        scriptPath = path, isEnabledOnWidget = template.showInWidget,
-                        type = template.type, group = template.group,
-                        checkMode = template.checkMode, processMatch = template.processMatch,
-                        canOpen = template.canOpen, openUrl = template.openUrl,
-                        canStart = template.canStart, canStop = template.canStop
-                    )
-                } else {
-                    ServiceItem(id = path.hashCode().toString(), name = name, scriptPath = path)
-                }
-                current.add(item)
-            } else if (template != null) {
-                val e = current[existing]
-                current[existing] = e.copy(
-                    displayName = template.displayName, port = template.defaultPort,
-                    isEnabledOnWidget = template.showInWidget, type = template.type,
-                    group = template.group, checkMode = template.checkMode,
-                    processMatch = template.processMatch, canOpen = template.canOpen,
-                    openUrl = template.openUrl, canStart = template.canStart,
-                    canStop = template.canStop
-                )
-            }
-        }
-        saveServices(current)
-        return current
     }
 
     // ── Status checks ─────────────────────────────────────────────────────────
+    //
+    // Primary: TCP socket connect to known port.
+    //   - Works from Android sandbox (no HTTP policy, no SELinux block)
+    //   - Fast: 1.5s timeout, result is deterministic
+    //   - Reliable: confirms the port is bound and accepting
+    //
+    // Process check (pgrep) is kept as fallback for services without ports,
+    // but is unreliable from within the Android app due to SELinux restrictions
+    // on cross-UID /proc access. Prefer PORT mode whenever possible.
 
     suspend fun checkStatus(item: ServiceItem): ServiceRuntime = when (item.checkMode) {
         StatusCheckMode.ACTION  -> ServiceRuntime.UNKNOWN
-        StatusCheckMode.PORT    -> checkPortStatus(item.port)
-        StatusCheckMode.PROCESS -> checkProcessStatus(item.processMatch)
+        StatusCheckMode.PORT    -> checkTcpPort(item.port)
+        StatusCheckMode.PROCESS -> checkProcess(item)
     }
 
-    private suspend fun checkPortStatus(port: Int?): ServiceRuntime {
+    /** Raw TCP socket connect — the most reliable way to probe a local service port. */
+    private suspend fun checkTcpPort(port: Int?): ServiceRuntime {
         if (port == null) return ServiceRuntime.NO_PORT
-        return try {
-            val response = withTimeoutOrNull(2000) {
-                try { client.get("http://127.0.0.1:$port") } catch (e: Exception) { null }
-            }
-            if (response != null && response.status.value in 200..499) {
-                ServiceRuntime(RunStatus.RUNNING)
-            } else {
-                ServiceRuntime(RunStatus.STOPPED)
-            }
-        } catch (e: Exception) {
-            ServiceRuntime(RunStatus.UNKNOWN)
-        }
-    }
-
-    private suspend fun checkProcessStatus(match: String?): ServiceRuntime {
-        if (match.isNullOrBlank()) return ServiceRuntime.NO_PORT
         return withContext(Dispatchers.IO) {
             try {
-                val proc = Runtime.getRuntime().exec(arrayOf("pgrep", "-f", match))
-                if (proc.waitFor() == 0) ServiceRuntime(RunStatus.ACTIVE)
-                else ServiceRuntime(RunStatus.STOPPED)
+                Socket().use { socket ->
+                    socket.connect(InetSocketAddress("127.0.0.1", port), 1500)
+                }
+                ServiceRuntime(RunStatus.RUNNING)
             } catch (e: Exception) {
-                ServiceRuntime(RunStatus.UNKNOWN)
+                ServiceRuntime(RunStatus.STOPPED)
             }
         }
+    }
+
+    /**
+     * Process check: tries pgrep first (works in Termux env), then falls back to
+     * a port check if the service has a known port. If both fail → UNKNOWN.
+     */
+    private suspend fun checkProcess(item: ServiceItem): ServiceRuntime {
+        val match = item.processMatch
+        if (!match.isNullOrBlank()) {
+            val pgrepResult = withContext(Dispatchers.IO) {
+                try {
+                    val proc = Runtime.getRuntime().exec(arrayOf("pgrep", "-f", match))
+                    if (proc.waitFor() == 0) RunStatus.ACTIVE else null
+                } catch (e: Exception) {
+                    null
+                }
+            }
+            if (pgrepResult != null) return ServiceRuntime(pgrepResult)
+        }
+        // Fallback: if the service has a port, use TCP check
+        if (item.port != null) return checkTcpPort(item.port)
+        return ServiceRuntime.UNKNOWN
     }
 
     // ── Actions ───────────────────────────────────────────────────────────────
@@ -313,6 +315,46 @@ class ServiceManager(val context: Context) {
     fun togglePower(serviceId: String, isRunning: Boolean) {
         val item = getSavedServices().find { it.id == serviceId } ?: return
         if (isRunning) stopService(item) else runTermuxScript(item.scriptPath)
+    }
+
+    /** Merge scan results from .sh script paths into the saved list. */
+    fun parseScanResult(stdout: String): List<ServiceItem> {
+        val lines   = stdout.lines().map { it.trim() }.filter { it.endsWith(".sh") }
+        val current = getSavedServices().toMutableList()
+
+        lines.forEach { path ->
+            val name     = path.substringAfterLast("/").removeSuffix(".sh")
+            val template = TemplateRegistry.find(name)
+            val existing = current.indexOfFirst { it.scriptPath == path }
+
+            if (existing == -1) {
+                current.add(if (template != null) {
+                    ServiceItem(
+                        id = path.hashCode().toString(), name = name,
+                        displayName = template.displayName, port = template.defaultPort,
+                        scriptPath = path, isEnabledOnWidget = template.showInWidget,
+                        type = template.type, group = template.group,
+                        checkMode = template.checkMode, processMatch = template.processMatch,
+                        canOpen = template.canOpen, openUrl = template.openUrl,
+                        canStart = template.canStart, canStop = template.canStop
+                    )
+                } else {
+                    ServiceItem(id = path.hashCode().toString(), name = name, scriptPath = path)
+                })
+            } else if (template != null) {
+                val e = current[existing]
+                current[existing] = e.copy(
+                    displayName = template.displayName, port = template.defaultPort,
+                    isEnabledOnWidget = template.showInWidget, type = template.type,
+                    group = template.group, checkMode = template.checkMode,
+                    processMatch = template.processMatch, canOpen = template.canOpen,
+                    openUrl = template.openUrl, canStart = template.canStart,
+                    canStop = template.canStop
+                )
+            }
+        }
+        saveServices(current)
+        return current
     }
 
     private fun sendTermuxCommand(args: Array<String>) {
