@@ -3,13 +3,19 @@ package com.litman.servicecontrol.model
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.JsonParser
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import java.net.InetSocketAddress
 import java.net.Socket
+
+private const val TAG = "ServiceCtrl"
 
 // ── Domain models ────────────────────────────────────────────────────────────
 
@@ -103,7 +109,6 @@ object TemplateRegistry {
             canStop = false
         )
     )
-
     fun find(name: String) = templates.find { it.name == name }
 }
 
@@ -115,17 +120,20 @@ class ServiceManager(val context: Context) {
         context.getSharedPreferences("services_config", Context.MODE_PRIVATE)
     private val gson = Gson()
 
-    // Version must be incremented whenever seed port/path data changes.
+    // Bump this when buildDefaultServices() changes port/path/mode config.
     private val SERVICES_VERSION = 3
 
     // ── Settings ─────────────────────────────────────────────────────────────
 
     fun getWidgetSettings(): WidgetSettings {
-        val json = prefs.getString("widget_settings", null) ?: return WidgetSettings()
+        val json = prefs.getString("widget_settings", null) ?: run {
+            Log.d(TAG, "getWidgetSettings: no saved settings, returning defaults")
+            return WidgetSettings()
+        }
         return try {
             val d   = WidgetSettings()
             val obj = JsonParser.parseString(json).asJsonObject
-            WidgetSettings(
+            val s = WidgetSettings(
                 nameSize          = if (obj.has("nameSize"))          obj["nameSize"].asFloat          else d.nameSize,
                 metaSize          = if (obj.has("metaSize"))          obj["metaSize"].asFloat          else d.metaSize,
                 padding           = if (obj.has("padding"))           obj["padding"].asFloat           else d.padding,
@@ -136,14 +144,41 @@ class ServiceManager(val context: Context) {
                 showMemory        = if (obj.has("showMemory"))        obj["showMemory"].asBoolean      else d.showMemory,
                 showColumnHeaders = if (obj.has("showColumnHeaders")) obj["showColumnHeaders"].asBoolean else d.showColumnHeaders
             )
+            Log.d(TAG, "getWidgetSettings: opacity=${s.opacity} font=${s.fontStyle} accent=${s.accentColor} nameSize=${s.nameSize}")
+            s
         } catch (e: Exception) {
+            Log.e(TAG, "getWidgetSettings: parse error, returning defaults", e)
             WidgetSettings()
         }
     }
 
     fun saveWidgetSettings(settings: WidgetSettings) {
-        prefs.edit().putString("widget_settings", gson.toJson(settings)).apply()
+        val json = gson.toJson(settings)
+        // commit() is synchronous — guarantees the value is readable before we push the widget
+        prefs.edit().putString("widget_settings", json).commit()
+        Log.d(TAG, "saveWidgetSettings: opacity=${settings.opacity} font=${settings.fontStyle} accent=${settings.accentColor}")
     }
+
+    // ── Pending action tracking ───────────────────────────────────────────────
+    // Used by both the app and the widget to show "pending" visual state
+    // while a start/stop command is in flight.
+
+    fun markPending(serviceId: String) {
+        val set = prefs.getStringSet("pending_actions", emptySet())!!.toMutableSet()
+        set.add(serviceId)
+        prefs.edit().putStringSet("pending_actions", set).commit()
+        Log.d(TAG, "markPending: $serviceId")
+    }
+
+    fun clearPending(serviceId: String) {
+        val set = prefs.getStringSet("pending_actions", emptySet())!!.toMutableSet()
+        set.remove(serviceId)
+        prefs.edit().putStringSet("pending_actions", set).commit()
+        Log.d(TAG, "clearPending: $serviceId")
+    }
+
+    fun isPending(serviceId: String): Boolean =
+        prefs.getStringSet("pending_actions", emptySet())!!.contains(serviceId)
 
     // ── Service list ──────────────────────────────────────────────────────────
 
@@ -153,6 +188,7 @@ class ServiceManager(val context: Context) {
             val type = object : TypeToken<List<ServiceItem>>() {}.type
             gson.fromJson<List<ServiceItem>>(json, type) ?: emptyList()
         } catch (e: Exception) {
+            Log.e(TAG, "getSavedServices: parse error", e)
             emptyList()
         }
     }
@@ -162,13 +198,14 @@ class ServiceManager(val context: Context) {
     }
 
     /**
-     * Ensures services are seeded with correct current config.
-     * Runs on every launch but only touches config when the SERVICES_VERSION bumps.
-     * User preferences (isMuted, isEnabledOnWidget) are preserved across migrations.
+     * Version-controlled seed.
+     * Updates port/path/mode config while preserving user prefs (isMuted, isEnabledOnWidget).
+     * Runs on every launch but only re-seeds when SERVICES_VERSION bumps.
      */
     fun ensureServiceConfig() {
         val savedVersion = prefs.getInt("services_config_version", 0)
         val existing     = getSavedServices()
+        Log.d(TAG, "ensureServiceConfig: savedVersion=$savedVersion SERVICES_VERSION=$SERVICES_VERSION services=${existing.size}")
 
         if (existing.isNotEmpty() && savedVersion >= SERVICES_VERSION) return
 
@@ -176,18 +213,14 @@ class ServiceManager(val context: Context) {
         val updated = buildDefaultServices().map { default ->
             val current = existingById[default.id]
             if (current != null) {
-                // Migrate: keep user prefs, overwrite technical config
-                default.copy(
-                    isMuted          = current.isMuted,
-                    isEnabledOnWidget = current.isEnabledOnWidget
-                )
+                default.copy(isMuted = current.isMuted, isEnabledOnWidget = current.isEnabledOnWidget)
             } else {
                 default
             }
         }
-
         saveServices(updated)
         prefs.edit().putInt("services_config_version", SERVICES_VERSION).apply()
+        Log.d(TAG, "ensureServiceConfig: migrated to version $SERVICES_VERSION (${updated.size} services)")
     }
 
     private fun buildDefaultServices(): List<ServiceItem> {
@@ -196,7 +229,7 @@ class ServiceManager(val context: Context) {
             ServiceItem(
                 id = "fuel-intel", name = "fuel-intel", displayName = "fuel-intel",
                 port = 5210,
-                scriptPath = "$base/fuel.sh",       // ← shortcut is fuel.sh not fuel-intel.sh
+                scriptPath = "$base/fuel.sh",
                 isEnabledOnWidget = true,
                 type = ServiceType.WEB_PANEL, group = ServiceGroup.PANELS,
                 checkMode = StatusCheckMode.PORT
@@ -211,11 +244,11 @@ class ServiceManager(val context: Context) {
             ),
             ServiceItem(
                 id = "dashboard", name = "dashboard", displayName = "dashboard",
-                port = 5000,                        // ← was PROCESS mode with no port; correct port is 5000
+                port = 5000,
                 scriptPath = "$base/dashboard.sh",
                 isEnabledOnWidget = true,
                 type = ServiceType.HYBRID, group = ServiceGroup.PANELS,
-                checkMode = StatusCheckMode.PORT    // ← switched from PROCESS to PORT
+                checkMode = StatusCheckMode.PORT
             ),
             ServiceItem(
                 id = "autosort", name = "autosort", displayName = "autosort",
@@ -237,15 +270,6 @@ class ServiceManager(val context: Context) {
     }
 
     // ── Status checks ─────────────────────────────────────────────────────────
-    //
-    // Primary: TCP socket connect to known port.
-    //   - Works from Android sandbox (no HTTP policy, no SELinux block)
-    //   - Fast: 1.5s timeout, result is deterministic
-    //   - Reliable: confirms the port is bound and accepting
-    //
-    // Process check (pgrep) is kept as fallback for services without ports,
-    // but is unreliable from within the Android app due to SELinux restrictions
-    // on cross-UID /proc access. Prefer PORT mode whenever possible.
 
     suspend fun checkStatus(item: ServiceItem): ServiceRuntime = when (item.checkMode) {
         StatusCheckMode.ACTION  -> ServiceRuntime.UNKNOWN
@@ -253,51 +277,57 @@ class ServiceManager(val context: Context) {
         StatusCheckMode.PROCESS -> checkProcess(item)
     }
 
-    /** Raw TCP socket connect — the most reliable way to probe a local service port. */
     private suspend fun checkTcpPort(port: Int?): ServiceRuntime {
         if (port == null) return ServiceRuntime.NO_PORT
         return withContext(Dispatchers.IO) {
             try {
                 Socket().use { socket ->
-                    socket.connect(InetSocketAddress("127.0.0.1", port), 1500)
+                    socket.connect(InetSocketAddress("127.0.0.1", port), 1000)
                 }
+                Log.d(TAG, "checkTcpPort: port=$port → RUNNING")
                 ServiceRuntime(RunStatus.RUNNING)
             } catch (e: Exception) {
+                Log.d(TAG, "checkTcpPort: port=$port → STOPPED (${e.javaClass.simpleName})")
                 ServiceRuntime(RunStatus.STOPPED)
             }
         }
     }
 
-    /**
-     * Process check: tries pgrep first (works in Termux env), then falls back to
-     * a port check if the service has a known port. If both fail → UNKNOWN.
-     */
     private suspend fun checkProcess(item: ServiceItem): ServiceRuntime {
         val match = item.processMatch
         if (!match.isNullOrBlank()) {
-            val pgrepResult = withContext(Dispatchers.IO) {
+            val result = withContext(Dispatchers.IO) {
                 try {
                     val proc = Runtime.getRuntime().exec(arrayOf("pgrep", "-f", match))
                     if (proc.waitFor() == 0) RunStatus.ACTIVE else null
                 } catch (e: Exception) {
+                    Log.w(TAG, "checkProcess: pgrep failed for '$match' (${e.javaClass.simpleName})")
                     null
                 }
             }
-            if (pgrepResult != null) return ServiceRuntime(pgrepResult)
+            if (result != null) {
+                Log.d(TAG, "checkProcess: '$match' → $result")
+                return ServiceRuntime(result)
+            }
         }
-        // Fallback: if the service has a port, use TCP check
+        // Fallback to port check
         if (item.port != null) return checkTcpPort(item.port)
         return ServiceRuntime.UNKNOWN
     }
 
     // ── Actions ───────────────────────────────────────────────────────────────
 
-    fun runTermuxScript(scriptPath: String) = sendTermuxCommand(arrayOf(scriptPath))
+    fun runTermuxScript(scriptPath: String) {
+        Log.d(TAG, "runTermuxScript: $scriptPath")
+        sendTermuxCommand(arrayOf(scriptPath))
+    }
 
     fun stopService(item: ServiceItem) {
+        Log.d(TAG, "stopService: ${item.label} mode=${item.checkMode} port=${item.port}")
         when {
-            item.checkMode == StatusCheckMode.PORT && item.port != null ->
-                sendTermuxCommand(arrayOf("-c", "fuser -k ${item.port}/tcp"))
+            item.port != null ->
+                // Kill by port — works for both PORT and HYBRID services
+                sendTermuxCommand(arrayOf("-c", "fuser -k ${item.port}/tcp 2>/dev/null; pkill -f '${item.name}' 2>/dev/null; true"))
             item.checkMode == StatusCheckMode.PROCESS && !item.processMatch.isNullOrBlank() ->
                 sendTermuxCommand(arrayOf("-c", "pkill -f \"${item.processMatch}\""))
         }
@@ -313,48 +343,12 @@ class ServiceManager(val context: Context) {
     }
 
     fun togglePower(serviceId: String, isRunning: Boolean) {
-        val item = getSavedServices().find { it.id == serviceId } ?: return
-        if (isRunning) stopService(item) else runTermuxScript(item.scriptPath)
-    }
-
-    /** Merge scan results from .sh script paths into the saved list. */
-    fun parseScanResult(stdout: String): List<ServiceItem> {
-        val lines   = stdout.lines().map { it.trim() }.filter { it.endsWith(".sh") }
-        val current = getSavedServices().toMutableList()
-
-        lines.forEach { path ->
-            val name     = path.substringAfterLast("/").removeSuffix(".sh")
-            val template = TemplateRegistry.find(name)
-            val existing = current.indexOfFirst { it.scriptPath == path }
-
-            if (existing == -1) {
-                current.add(if (template != null) {
-                    ServiceItem(
-                        id = path.hashCode().toString(), name = name,
-                        displayName = template.displayName, port = template.defaultPort,
-                        scriptPath = path, isEnabledOnWidget = template.showInWidget,
-                        type = template.type, group = template.group,
-                        checkMode = template.checkMode, processMatch = template.processMatch,
-                        canOpen = template.canOpen, openUrl = template.openUrl,
-                        canStart = template.canStart, canStop = template.canStop
-                    )
-                } else {
-                    ServiceItem(id = path.hashCode().toString(), name = name, scriptPath = path)
-                })
-            } else if (template != null) {
-                val e = current[existing]
-                current[existing] = e.copy(
-                    displayName = template.displayName, port = template.defaultPort,
-                    isEnabledOnWidget = template.showInWidget, type = template.type,
-                    group = template.group, checkMode = template.checkMode,
-                    processMatch = template.processMatch, canOpen = template.canOpen,
-                    openUrl = template.openUrl, canStart = template.canStart,
-                    canStop = template.canStop
-                )
-            }
+        val item = getSavedServices().find { it.id == serviceId } ?: run {
+            Log.w(TAG, "togglePower: service not found: $serviceId")
+            return
         }
-        saveServices(current)
-        return current
+        Log.d(TAG, "togglePower: ${item.label} isRunning=$isRunning → ${if (isRunning) "STOP" else "START"}")
+        if (isRunning) stopService(item) else runTermuxScript(item.scriptPath)
     }
 
     private fun sendTermuxCommand(args: Array<String>) {
@@ -364,6 +358,78 @@ class ServiceManager(val context: Context) {
             putExtra("com.termux.RUN_COMMAND_ARGUMENTS", args)
             putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
         }
-        try { context.startService(intent) } catch (_: Exception) {}
+        Log.d(TAG, "sendTermuxCommand: bash ${args.joinToString(" ")}")
+        try {
+            context.startService(intent)
+        } catch (e: Exception) {
+            Log.e(TAG, "sendTermuxCommand: startService failed", e)
+        }
+    }
+
+    // ── Parallel status check ─────────────────────────────────────────────────
+
+    /** Check all services in parallel — much faster than sequential when some are offline. */
+    suspend fun checkAllStatuses(services: List<ServiceItem>): Map<String, ServiceRuntime> =
+        coroutineScope {
+            services.map { service ->
+                async { service.id to checkStatus(service) }
+            }.awaitAll().toMap()
+        }
+
+    // ── Uptime tracking ───────────────────────────────────────────────────────
+    // Called when we confirm a service transitioned STOPPED → RUNNING.
+
+    fun recordStartTime(serviceId: String) {
+        prefs.edit().putLong("up_since_$serviceId", System.currentTimeMillis()).commit()
+        Log.d(TAG, "recordStartTime: $serviceId")
+    }
+
+    fun clearStartTime(serviceId: String) {
+        prefs.edit().remove("up_since_$serviceId").apply()
+        Log.d(TAG, "clearStartTime: $serviceId")
+    }
+
+    fun getUptime(serviceId: String): String? {
+        val since = prefs.getLong("up_since_$serviceId", 0L)
+        if (since == 0L) return null
+        val sec = (System.currentTimeMillis() - since) / 1000L
+        return when {
+            sec < 60   -> "${sec}s"
+            sec < 3600 -> "${sec / 60}m"
+            else       -> "${sec / 3600}h ${(sec % 3600) / 60}m"
+        }
+    }
+
+    /** Scan .sh scripts and merge into saved list. */
+    fun parseScanResult(stdout: String): List<ServiceItem> {
+        val lines   = stdout.lines().map { it.trim() }.filter { it.endsWith(".sh") }
+        val current = getSavedServices().toMutableList()
+        lines.forEach { path ->
+            val name     = path.substringAfterLast("/").removeSuffix(".sh")
+            val template = TemplateRegistry.find(name)
+            val existing = current.indexOfFirst { it.scriptPath == path }
+            if (existing == -1) {
+                current.add(if (template != null) ServiceItem(
+                    id = path.hashCode().toString(), name = name,
+                    displayName = template.displayName, port = template.defaultPort,
+                    scriptPath = path, isEnabledOnWidget = template.showInWidget,
+                    type = template.type, group = template.group,
+                    checkMode = template.checkMode, processMatch = template.processMatch,
+                    canOpen = template.canOpen, openUrl = template.openUrl,
+                    canStart = template.canStart, canStop = template.canStop
+                ) else ServiceItem(id = path.hashCode().toString(), name = name, scriptPath = path))
+            } else if (template != null) {
+                val e = current[existing]
+                current[existing] = e.copy(
+                    displayName = template.displayName, port = template.defaultPort,
+                    isEnabledOnWidget = template.showInWidget, type = template.type,
+                    group = template.group, checkMode = template.checkMode,
+                    processMatch = template.processMatch, canOpen = template.canOpen,
+                    openUrl = template.openUrl, canStart = template.canStart, canStop = template.canStop
+                )
+            }
+        }
+        saveServices(current)
+        return current
     }
 }

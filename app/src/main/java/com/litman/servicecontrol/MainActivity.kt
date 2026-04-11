@@ -1,6 +1,7 @@
 package com.litman.servicecontrol
 
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -25,6 +26,8 @@ import com.litman.servicecontrol.model.*
 import com.litman.servicecontrol.widget.ServiceWidget
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+
+private const val TAG = "ServiceCtrl"
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 private val BG      = Color(0xFF0D0D11)
@@ -55,6 +58,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         manager = ServiceManager(this)
         manager.ensureServiceConfig()
+        Log.d(TAG, "MainActivity: onCreate complete")
 
         setContent {
             MaterialTheme(colorScheme = darkColorScheme(background = BG)) {
@@ -70,31 +74,45 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun ServiceControlApp(manager: ServiceManager) {
-    var services     by remember { mutableStateOf(manager.getSavedServices()) }
-    val runtimes      = remember { mutableStateMapOf<String, ServiceRuntime>() }
-    val scope         = rememberCoroutineScope()
-    var settings     by remember { mutableStateOf(manager.getWidgetSettings()) }
-    var showSettings by remember { mutableStateOf(false) }
+    var services        by remember { mutableStateOf(manager.getSavedServices()) }
+    val runtimes         = remember { mutableStateMapOf<String, ServiceRuntime>() }
+    val pendingServices  = remember { mutableStateMapOf<String, Boolean>() }
+    val scope            = rememberCoroutineScope()
+    var settings        by remember { mutableStateOf(manager.getWidgetSettings()) }
+    var showSettings    by remember { mutableStateOf(false) }
 
     fun refreshAll() {
         scope.launch {
             services = manager.getSavedServices()
-            services.forEach { runtimes[it.id] = manager.checkStatus(it) }
+            // Parallel checks — all services complete in ~1 s instead of N × 1 s
+            val statuses = manager.checkAllStatuses(services)
+            statuses.forEach { (id, rt) -> runtimes[id] = rt }
+            Log.d(TAG, "refreshAll: ${services.size} services checked in parallel")
         }
     }
 
     fun pushWidget() {
-        scope.launch { ServiceWidget().updateAll(manager.context) }
+        scope.launch {
+            Log.d(TAG, "pushWidget: pushing to all widget instances")
+            ServiceWidget().updateAll(manager.context)
+        }
     }
 
+    // Save settings without pushing — called on every slider drag tick
     fun updateSettings(new: WidgetSettings) {
         settings = new
         manager.saveWidgetSettings(new)
+        Log.d(TAG, "updateSettings: saved opacity=${new.opacity} font=${new.fontStyle} accent=${new.accentColor}")
+    }
+
+    // Push saved settings to widget — called on slider release / toggle / picker select
+    fun applySettings() {
+        Log.d(TAG, "applySettings: pushing widget update")
         pushWidget()
     }
 
     LaunchedEffect(Unit) {
-        while (true) { refreshAll(); delay(10_000) }
+        while (true) { refreshAll(); delay(15_000) }
     }
 
     Column(
@@ -141,9 +159,19 @@ fun ServiceControlApp(manager: ServiceManager) {
         Spacer(Modifier.height(14.dp))
 
         if (showSettings) {
-            SettingsPane(settings, onUpdate = ::updateSettings)
+            SettingsPane(
+                settings = settings,
+                onUpdate = ::updateSettings,
+                onApply  = ::applySettings
+            )
         } else {
-            ServiceListPane(services, runtimes, manager) { refreshAll(); pushWidget() }
+            ServiceListPane(
+                services        = services,
+                runtimes        = runtimes,
+                pendingServices = pendingServices,
+                manager         = manager,
+                onRefresh       = { refreshAll(); pushWidget() }
+            )
         }
     }
 }
@@ -168,7 +196,11 @@ private fun SectionLabel(text: String) {
 // ── Settings pane ─────────────────────────────────────────────────────────────
 
 @Composable
-fun SettingsPane(settings: WidgetSettings, onUpdate: (WidgetSettings) -> Unit) {
+fun SettingsPane(
+    settings: WidgetSettings,
+    onUpdate: (WidgetSettings) -> Unit,
+    onApply: () -> Unit
+) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(0.dp)
@@ -178,16 +210,20 @@ fun SettingsPane(settings: WidgetSettings, onUpdate: (WidgetSettings) -> Unit) {
 
         item {
             SettingRow(label = "Name Size", value = "${settings.nameSize.toInt()} sp") {
-                SettingSlider(settings.nameSize, 8f, 22f) {
-                    onUpdate(settings.copy(nameSize = it))
-                }
+                SettingSlider(
+                    value = settings.nameSize, min = 8f, max = 22f,
+                    onValueChange = { onUpdate(settings.copy(nameSize = it)) },
+                    onFinished    = onApply
+                )
             }
         }
         item {
             SettingRow(label = "Meta Size", value = "${settings.metaSize.toInt()} sp") {
-                SettingSlider(settings.metaSize, 6f, 16f) {
-                    onUpdate(settings.copy(metaSize = it))
-                }
+                SettingSlider(
+                    value = settings.metaSize, min = 6f, max = 16f,
+                    onValueChange = { onUpdate(settings.copy(metaSize = it)) },
+                    onFinished    = onApply
+                )
             }
         }
 
@@ -195,23 +231,29 @@ fun SettingsPane(settings: WidgetSettings, onUpdate: (WidgetSettings) -> Unit) {
 
         item {
             SettingRow(label = "Padding", value = "${settings.padding.toInt()} dp") {
-                SettingSlider(settings.padding, 4f, 28f) {
-                    onUpdate(settings.copy(padding = it))
-                }
+                SettingSlider(
+                    value = settings.padding, min = 4f, max = 28f,
+                    onValueChange = { onUpdate(settings.copy(padding = it)) },
+                    onFinished    = onApply
+                )
             }
         }
         item {
             SettingRow(label = "Corner Radius", value = "${settings.cornerRadius.toInt()} dp") {
-                SettingSlider(settings.cornerRadius, 0f, 28f) {
-                    onUpdate(settings.copy(cornerRadius = it))
-                }
+                SettingSlider(
+                    value = settings.cornerRadius, min = 0f, max = 28f,
+                    onValueChange = { onUpdate(settings.copy(cornerRadius = it)) },
+                    onFinished    = onApply
+                )
             }
         }
         item {
             SettingRow(label = "Opacity", value = "${(settings.opacity / 255f * 100).toInt()} %") {
-                SettingSlider(settings.opacity.toFloat(), 60f, 255f) {
-                    onUpdate(settings.copy(opacity = it.toInt()))
-                }
+                SettingSlider(
+                    value = settings.opacity.toFloat(), min = 60f, max = 255f,
+                    onValueChange = { onUpdate(settings.copy(opacity = it.toInt())) },
+                    onFinished    = onApply
+                )
             }
         }
 
@@ -220,29 +262,29 @@ fun SettingsPane(settings: WidgetSettings, onUpdate: (WidgetSettings) -> Unit) {
 
         item {
             SettingToggle(
-                label    = "Memory",
-                subtitle = "Show memory usage per service",
+                label    = "Uptime",
+                subtitle = "Show service uptime when running",
                 value    = settings.showMemory
-            ) { onUpdate(settings.copy(showMemory = it)) }
+            ) { onUpdate(settings.copy(showMemory = it)); onApply() }
         }
         item {
             SettingToggle(
                 label    = "Column Headers",
                 subtitle = "Show SERVICE / CTRL labels",
                 value    = settings.showColumnHeaders
-            ) { onUpdate(settings.copy(showColumnHeaders = it)) }
+            ) { onUpdate(settings.copy(showColumnHeaders = it)); onApply() }
         }
 
         // ── Font ────────────────────────────────────────────
         item { Spacer(Modifier.height(6.dp)); SectionLabel("FONT") }
         item {
-            FontPicker(settings.fontStyle) { onUpdate(settings.copy(fontStyle = it)) }
+            FontPicker(settings.fontStyle) { onUpdate(settings.copy(fontStyle = it)); onApply() }
         }
 
         // ── Accent ──────────────────────────────────────────
         item { Spacer(Modifier.height(6.dp)); SectionLabel("ACCENT COLOR") }
         item {
-            AccentPicker(settings.accentColor) { onUpdate(settings.copy(accentColor = it)) }
+            AccentPicker(settings.accentColor) { onUpdate(settings.copy(accentColor = it)); onApply() }
         }
 
         item { Spacer(Modifier.height(24.dp)) }
@@ -264,11 +306,19 @@ fun SettingRow(label: String, value: String, content: @Composable () -> Unit) {
     }
 }
 
+// onFinished is called once when the user releases the slider thumb
 @Composable
-fun SettingSlider(value: Float, min: Float, max: Float, onValueChange: (Float) -> Unit) {
+fun SettingSlider(
+    value: Float,
+    min: Float,
+    max: Float,
+    onValueChange: (Float) -> Unit,
+    onFinished: (() -> Unit)? = null
+) {
     Slider(
         value = value,
         onValueChange = onValueChange,
+        onValueChangeFinished = onFinished,
         valueRange = min..max,
         modifier = Modifier.fillMaxWidth(),
         colors = SliderDefaults.colors(
@@ -336,8 +386,7 @@ fun FontCard(
     fontFamily: FontFamily, isSelected: Boolean,
     onSelect: (String) -> Unit, modifier: Modifier = Modifier
 ) {
-    val accent = if (isSelected) GREEN else Color.Transparent
-    val bg     = if (isSelected) Color(0xFF0D2015) else SURF
+    val bg = if (isSelected) Color(0xFF0D2015) else SURF
 
     Column(
         modifier = modifier
@@ -365,9 +414,9 @@ fun AccentPicker(current: String, onSelect: (String) -> Unit) {
         modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        AccentCard("GREEN", GREEN,  "Terminal",  current, onSelect, Modifier.weight(1f))
-        AccentCard("CYAN",  CYAN,   "Tech",      current, onSelect, Modifier.weight(1f))
-        AccentCard("AMBER", AMBER,  "Industrial",current, onSelect, Modifier.weight(1f))
+        AccentCard("GREEN", GREEN,  "Terminal",   current, onSelect, Modifier.weight(1f))
+        AccentCard("CYAN",  CYAN,   "Tech",       current, onSelect, Modifier.weight(1f))
+        AccentCard("AMBER", AMBER,  "Industrial", current, onSelect, Modifier.weight(1f))
     }
 }
 
@@ -403,6 +452,7 @@ fun AccentCard(
 fun ServiceListPane(
     services: List<ServiceItem>,
     runtimes: Map<String, ServiceRuntime>,
+    pendingServices: MutableMap<String, Boolean>,
     manager: ServiceManager,
     onRefresh: () -> Unit
 ) {
@@ -414,10 +464,12 @@ fun ServiceListPane(
             item { SectionLabel("PROCESSES") }
             items(panels) { service ->
                 ServiceRow(
-                    service  = service,
-                    runtime  = runtimes[service.id] ?: ServiceRuntime.UNKNOWN,
-                    manager  = manager,
-                    onRefresh = onRefresh
+                    service    = service,
+                    runtime    = runtimes[service.id] ?: ServiceRuntime.UNKNOWN,
+                    isPending  = pendingServices[service.id] == true,
+                    manager    = manager,
+                    onPending  = { id, v -> pendingServices[id] = v },
+                    onRefresh  = onRefresh
                 )
             }
         }
@@ -434,13 +486,15 @@ fun ServiceListPane(
 fun ServiceRow(
     service: ServiceItem,
     runtime: ServiceRuntime,
+    isPending: Boolean,
     manager: ServiceManager,
+    onPending: (String, Boolean) -> Unit,
     onRefresh: () -> Unit
 ) {
-    val isRunning   = runtime.status == RunStatus.RUNNING || runtime.status == RunStatus.ACTIVE
-    val isUnknown   = runtime.status == RunStatus.UNKNOWN
-    val dotColor    = Color(statusDotColor(runtime))
-    val statusText  = statusLabel(runtime)
+    val scope      = rememberCoroutineScope()
+    val isRunning  = runtime.status == RunStatus.RUNNING || runtime.status == RunStatus.ACTIVE
+    val isUnknown  = runtime.status == RunStatus.UNKNOWN
+    val dotColor   = Color(statusDotColor(runtime))
 
     val modeStr = when {
         service.checkMode == StatusCheckMode.PORT && service.port != null -> ":${service.port}"
@@ -448,46 +502,88 @@ fun ServiceRow(
         else -> "fork"
     }
 
+    // Visual state derived from pending / runtime
+    val nameColor  = if (isPending) MUTED else TEXT
+    val statusText = if (isPending) "···" else statusLabel(runtime)
+    val btnBg = when {
+        isPending  -> Color(0xFF151520)
+        isRunning  -> Color(0xFF162312)
+        else       -> Color(0xFF1E1010)
+    }
+    val btnFg = when {
+        isPending  -> DIM
+        isRunning  -> GREEN
+        isUnknown  -> MUTED
+        else       -> RED
+    }
+    val btnLabel = when {
+        isPending  -> "···"
+        isRunning  -> "STOP"
+        else       -> "START"
+    }
+
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Status indicator
+        // Status dot
         Box(
             modifier = Modifier
                 .size(6.dp)
-                .background(dotColor, RoundedCornerShape(3.dp))
+                .background(
+                    if (isPending) DIM else dotColor,
+                    RoundedCornerShape(3.dp)
+                )
         )
         Spacer(Modifier.width(12.dp))
 
         // Name + meta
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = service.label, color = TEXT,
+                text = service.label, color = nameColor,
                 fontWeight = FontWeight.Medium, fontSize = 14.sp
             )
             Spacer(Modifier.height(1.dp))
             Text(
-                text = "$modeStr  ·  $statusText",
+                text = if (isPending) statusText else "$modeStr  ·  $statusText",
                 color = MUTED, fontSize = 11.sp
             )
         }
 
-        // Power button
-        val btnBg  = if (isRunning) Color(0xFF162312) else Color(0xFF1E1010)
-        val btnFg  = if (isRunning) GREEN else if (isUnknown) MUTED else RED
-        val btnLbl = if (isRunning) "STOP" else "START"
-
+        // Power button — disabled while pending
         Box(
             modifier = Modifier
                 .background(btnBg, RoundedCornerShape(7.dp))
-                .border(1.dp, btnFg.copy(alpha = 0.30f), RoundedCornerShape(7.dp))
-                .clickable { manager.togglePower(service.id, isRunning); onRefresh() }
+                .border(1.dp, btnFg.copy(alpha = 0.25f), RoundedCornerShape(7.dp))
+                .then(
+                    if (!isPending) Modifier.clickable {
+                        scope.launch {
+                            Log.d(TAG, "ServiceRow: tap ${service.label} isRunning=$isRunning → ${if (isRunning) "STOP" else "START"}")
+                            onPending(service.id, true)
+                            manager.markPending(service.id)
+                            manager.togglePower(service.id, isRunning)
+                            delay(2500)
+                            // Track uptime on confirmed state transition
+                            val newRt       = manager.checkStatus(service)
+                            val isNowRunning = newRt.status == RunStatus.RUNNING || newRt.status == RunStatus.ACTIVE
+                            when {
+                                isNowRunning && !isRunning  -> manager.recordStartTime(service.id)
+                                !isNowRunning && isRunning  -> manager.clearStartTime(service.id)
+                            }
+                            manager.clearPending(service.id)
+                            onPending(service.id, false)
+                            onRefresh()
+                            Log.d(TAG, "ServiceRow: done for ${service.label} isNowRunning=$isNowRunning")
+                        }
+                    } else Modifier
+                )
                 .padding(horizontal = 14.dp, vertical = 7.dp)
         ) {
             Text(
-                text = btnLbl, color = btnFg,
-                fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp
+                text = btnLabel, color = btnFg,
+                fontSize = 10.sp,
+                fontWeight = if (isPending) FontWeight.Normal else FontWeight.Bold,
+                letterSpacing = if (isPending) 0.sp else 0.8.sp
             )
         }
     }
@@ -499,7 +595,11 @@ fun ActionRow(action: ServiceItem, manager: ServiceManager, onRefresh: () -> Uni
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { manager.runTermuxScript(action.scriptPath); onRefresh() }
+            .clickable {
+                Log.d(TAG, "ActionRow: running ${action.label}")
+                manager.runTermuxScript(action.scriptPath)
+                onRefresh()
+            }
             .padding(vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

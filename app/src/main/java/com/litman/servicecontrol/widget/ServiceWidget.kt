@@ -1,6 +1,9 @@
 package com.litman.servicecontrol.widget
 
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.util.Log
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -13,6 +16,7 @@ import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.actionRunCallback
+import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.appwidget.cornerRadius
 import androidx.glance.appwidget.provideContent
 import androidx.glance.background
@@ -23,8 +27,9 @@ import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
 import com.litman.servicecontrol.model.*
-import java.util.Locale
-import kotlin.math.abs
+import kotlinx.coroutines.delay
+
+private const val TAG = "ServiceCtrl"
 
 // ── Theme helpers ─────────────────────────────────────────────────────────────
 
@@ -47,17 +52,10 @@ private fun widgetAccentBg(style: String): Color = when (style) {
 
 // ── Data helpers ──────────────────────────────────────────────────────────────
 
-/** Mode label: shows port or "proc" — mimics PM2 ps output */
 private fun modeStr(service: ServiceItem): String = when {
     service.checkMode == StatusCheckMode.PORT && service.port != null -> ":${service.port}"
     service.checkMode == StatusCheckMode.PROCESS -> "proc"
     else -> "fork"
-}
-
-/** Deterministic fake memory value — stable per service, replaced by real data later */
-private fun fakeMemMb(service: ServiceItem): String {
-    val mb = 18 + (abs(service.id.hashCode()) % 820) / 10
-    return String.format(Locale.US, "%d MB", mb)
 }
 
 // ── Widget entry point ────────────────────────────────────────────────────────
@@ -65,6 +63,7 @@ private fun fakeMemMb(service: ServiceItem): String {
 class ServiceWidget : GlanceAppWidget() {
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
+        Log.d(TAG, "provideGlance: loading settings and services")
         val manager  = ServiceManager(context)
         val settings = manager.getWidgetSettings()
         val all      = manager.getSavedServices()
@@ -73,19 +72,26 @@ class ServiceWidget : GlanceAppWidget() {
             it.isEnabledOnWidget &&
             (it.type == ServiceType.WEB_PANEL || it.type == ServiceType.HYBRID)
         }
+        Log.d(TAG, "provideGlance: ${services.size} widget services")
 
-        // Check all ports in parallel via coroutines (each checkStatus suspends independently)
-        val runtimes = services.associate { it.id to manager.checkStatus(it) }
-
+        // Parallel TCP checks — all 4 services in ~1 s instead of ~4 s sequential
+        val runtimes    = manager.checkAllStatuses(services)
         val activeCount = runtimes.values.count {
             it.status == RunStatus.RUNNING || it.status == RunStatus.ACTIVE
         }
+        val pending = services.associate { it.id to manager.isPending(it.id) }
+        // Uptime per running service (null when unknown or not tracked)
+        val uptimes = services.associate { it.id to manager.getUptime(it.id) }
+
+        Log.d(TAG, "provideGlance: $activeCount/${services.size} online")
 
         provideContent {
             WidgetBoard(
                 services    = services,
                 runtimes    = runtimes,
                 activeCount = activeCount,
+                pending     = pending,
+                uptimes     = uptimes,
                 settings    = settings
             )
         }
@@ -99,6 +105,8 @@ private fun WidgetBoard(
     services: List<ServiceItem>,
     runtimes: Map<String, ServiceRuntime>,
     activeCount: Int,
+    pending: Map<String, Boolean>,
+    uptimes: Map<String, String?>,
     settings: WidgetSettings
 ) {
     val bg     = Color(red = 13, green = 13, blue = 17, alpha = settings.opacity)
@@ -135,13 +143,12 @@ private fun WidgetBoard(
                     Text(
                         text = "PM2  ·  ",
                         style = TextStyle(
-                            color    = ColorProvider(Color(0xFF404050)),
-                            fontSize = (settings.metaSize * 0.85f).sp,
+                            color      = ColorProvider(Color(0xFF404050)),
+                            fontSize   = (settings.metaSize * 0.85f).sp,
                             fontFamily = font
                         )
                     )
                     Text(
-                        // Bold colored active count is the most important header stat
                         text = "$activeCount/$total",
                         style = TextStyle(
                             color      = ColorProvider(if (activeCount > 0) accent else Color(0xFF404050)),
@@ -153,15 +160,14 @@ private fun WidgetBoard(
                     Text(
                         text = " online",
                         style = TextStyle(
-                            color    = ColorProvider(Color(0xFF404050)),
-                            fontSize = (settings.metaSize * 0.85f).sp,
+                            color      = ColorProvider(Color(0xFF404050)),
+                            fontSize   = (settings.metaSize * 0.85f).sp,
                             fontFamily = font
                         )
                     )
                 }
             }
 
-            // Refresh button — small, unobtrusive
             Box(
                 modifier = GlanceModifier
                     .size(24.dp)
@@ -172,10 +178,7 @@ private fun WidgetBoard(
             ) {
                 Text(
                     text = "↻",
-                    style = TextStyle(
-                        color    = ColorProvider(Color(0xFF55556A)),
-                        fontSize = 12.sp
-                    )
+                    style = TextStyle(color = ColorProvider(Color(0xFF55556A)), fontSize = 12.sp)
                 )
             }
         }
@@ -192,18 +195,16 @@ private fun WidgetBoard(
 
         // ── Optional column headers ───────────────────────────
         if (settings.showColumnHeaders) {
+            val hStyle = TextStyle(
+                color      = ColorProvider(Color(0xFF2E2E3E)),
+                fontSize   = (settings.metaSize * 0.78f).sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = font
+            )
             Row(
-                modifier = GlanceModifier
-                    .fillMaxWidth()
-                    .padding(bottom = 5.dp),
+                modifier = GlanceModifier.fillMaxWidth().padding(bottom = 5.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                val hStyle = TextStyle(
-                    color      = ColorProvider(Color(0xFF2E2E3E)),
-                    fontSize   = (settings.metaSize * 0.78f).sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = font
-                )
                 Text(text = "SERVICE", modifier = GlanceModifier.defaultWeight(), style = hStyle)
                 Text(text = "CTRL", style = hStyle)
             }
@@ -215,18 +216,18 @@ private fun WidgetBoard(
                 text = "> no services configured",
                 modifier = GlanceModifier.padding(top = 4.dp),
                 style = TextStyle(
-                    color    = ColorProvider(Color(0xFF404050)),
-                    fontSize = settings.metaSize.sp,
+                    color      = ColorProvider(Color(0xFF404050)),
+                    fontSize   = settings.metaSize.sp,
                     fontFamily = font
                 )
             )
         } else {
             services.forEachIndexed { index, service ->
-                val runtime = runtimes[service.id] ?: ServiceRuntime.UNKNOWN
-                WidgetServiceRow(service, runtime, settings, font, accent)
-                if (index < services.lastIndex) {
-                    Spacer(GlanceModifier.height(8.dp))
-                }
+                val runtime   = runtimes[service.id] ?: ServiceRuntime.UNKNOWN
+                val isPending = pending[service.id] ?: false
+                val uptime    = uptimes[service.id]
+                WidgetServiceRow(service, runtime, isPending, uptime, settings, font, accent)
+                if (index < services.lastIndex) Spacer(GlanceModifier.height(8.dp))
             }
         }
     }
@@ -238,6 +239,8 @@ private fun WidgetBoard(
 private fun WidgetServiceRow(
     service: ServiceItem,
     runtime: ServiceRuntime,
+    isPending: Boolean,
+    uptime: String?,
     settings: WidgetSettings,
     font: FontFamily,
     accent: Color
@@ -245,19 +248,20 @@ private fun WidgetServiceRow(
     val isRunning = runtime.status == RunStatus.RUNNING || runtime.status == RunStatus.ACTIVE
     val isUnknown = runtime.status == RunStatus.UNKNOWN
 
-    // ── Colors ────────────────────────────────────────────────
-    // Running: full brightness. Offline: red but dim. Unknown: fully muted.
     val nameColor = when {
+        isPending -> Color(0xFF505060)
         isRunning -> Color(0xFFEEEEF5)
         isUnknown -> Color(0xFF505060)
         else      -> Color(0xFF6A6A7A)
     }
     val statusColor = when {
+        isPending -> Color(0xFF404050)  // pending: muted
         isRunning -> accent
         isUnknown -> Color(0xFF3A3A4A)
-        else      -> Color(0xFF993333)   // dim red — less alarming than bright red
+        else      -> Color(0xFF993333)
     }
     val statusLabel = when {
+        isPending -> "···"   // clear visual indicator that action is in flight
         isRunning -> "online"
         isUnknown -> "—"
         else      -> "offline"
@@ -269,7 +273,6 @@ private fun WidgetServiceRow(
     ) {
         // ── Left column ───────────────────────────────────────
         Column(modifier = GlanceModifier.defaultWeight()) {
-            // Service name — high contrast when online
             Text(
                 text = service.label,
                 style = TextStyle(
@@ -280,48 +283,48 @@ private fun WidgetServiceRow(
                 )
             )
             Spacer(GlanceModifier.height(1.dp))
-            // Meta row — mode · status [· mem]
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = modeStr(service),
-                    style = TextStyle(
-                        color    = ColorProvider(Color(0xFF3E3E52)),
-                        fontSize = settings.metaSize.sp,
-                        fontFamily = font
+                if (!isPending) {
+                    Text(
+                        text = modeStr(service),
+                        style = TextStyle(
+                            color      = ColorProvider(Color(0xFF3E3E52)),
+                            fontSize   = settings.metaSize.sp,
+                            fontFamily = font
+                        )
                     )
-                )
-                Text(
-                    text = "  ·  ",
-                    style = TextStyle(
-                        color    = ColorProvider(Color(0xFF252530)),
-                        fontSize = settings.metaSize.sp,
-                        fontFamily = font
+                    Text(
+                        text = "  ·  ",
+                        style = TextStyle(
+                            color      = ColorProvider(Color(0xFF252530)),
+                            fontSize   = settings.metaSize.sp,
+                            fontFamily = font
+                        )
                     )
-                )
+                }
                 Text(
                     text = statusLabel,
                     style = TextStyle(
                         color      = ColorProvider(statusColor),
                         fontSize   = settings.metaSize.sp,
-                        fontWeight = if (isRunning) FontWeight.Medium else FontWeight.Normal,
+                        fontWeight = if (isRunning && !isPending) FontWeight.Medium else FontWeight.Normal,
                         fontFamily = font
                     )
                 )
-                // Memory — only when running and enabled
-                if (isRunning && settings.showMemory) {
+                if (isRunning && !isPending && settings.showMemory && uptime != null) {
                     Text(
                         text = "  ·  ",
                         style = TextStyle(
-                            color    = ColorProvider(Color(0xFF252530)),
-                            fontSize = settings.metaSize.sp,
+                            color      = ColorProvider(Color(0xFF252530)),
+                            fontSize   = settings.metaSize.sp,
                             fontFamily = font
                         )
                     )
                     Text(
-                        text = fakeMemMb(service),
+                        text = uptime,
                         style = TextStyle(
-                            color    = ColorProvider(Color(0xFF3E3E52)),
-                            fontSize = settings.metaSize.sp,
+                            color      = ColorProvider(Color(0xFF3E3E52)),
+                            fontSize   = settings.metaSize.sp,
                             fontFamily = font
                         )
                     )
@@ -329,10 +332,46 @@ private fun WidgetServiceRow(
             }
         }
 
-        // ── Right column: power button ────────────────────────
+        // ── Open in browser (only for services with a URL) ────
+        if (isRunning && !isPending && service.canOpen && service.openUrl != null) {
+            Spacer(GlanceModifier.width(6.dp))
+            Box(
+                modifier = GlanceModifier
+                    .size((settings.nameSize * 2.0f).dp)
+                    .background(ColorProvider(Color(0xFF0E1A22)))
+                    .cornerRadius(7.dp)
+                    .clickable(
+                        actionStartActivity(
+                            Intent(Intent.ACTION_VIEW, Uri.parse(service.openUrl))
+                        )
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "↗",
+                    style = TextStyle(
+                        color      = ColorProvider(Color(0xFF2A6080)),
+                        fontSize   = (settings.nameSize * 0.85f).sp,
+                        fontFamily = font
+                    )
+                )
+            }
+            Spacer(GlanceModifier.width(6.dp))
+        }
+
+        // ── Power button ──────────────────────────────────────
         val btnSize = (settings.nameSize * 2.0f).dp
-        val btnBg   = if (isRunning) widgetAccentBg(settings.accentColor) else Color(0xFF1C0E0E)
-        val btnFg   = if (isRunning) accent else if (isUnknown) Color(0xFF3A3A4A) else Color(0xFF883333)
+        val btnBg = when {
+            isPending -> Color(0xFF1A1A22)
+            isRunning -> widgetAccentBg(settings.accentColor)
+            else      -> Color(0xFF1C0E0E)
+        }
+        val btnFg = when {
+            isPending -> Color(0xFF353545)
+            isRunning -> accent
+            isUnknown -> Color(0xFF3A3A4A)
+            else      -> Color(0xFF883333)
+        }
 
         Box(
             modifier = GlanceModifier
@@ -341,20 +380,20 @@ private fun WidgetServiceRow(
                 .cornerRadius(7.dp)
                 .clickable(
                     actionRunCallback<TogglePowerAction>(
-                        actionParametersOf(
-                            serviceIdKey to service.id,
-                            isRunningKey to isRunning
-                        )
+                        // Only pass serviceId — we re-check actual status inside callback
+                        // to avoid acting on stale widget display state
+                        actionParametersOf(serviceIdKey to service.id)
                     )
                 ),
             contentAlignment = Alignment.Center
         ) {
             Text(
-                text = "⏻",
+                text = if (isPending) "·" else "⏻",
                 style = TextStyle(
                     color      = ColorProvider(btnFg),
                     fontSize   = (settings.nameSize * 0.95f).sp,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = font
                 )
             )
         }
@@ -364,10 +403,10 @@ private fun WidgetServiceRow(
 // ── Action callbacks ──────────────────────────────────────────────────────────
 
 private val serviceIdKey = ActionParameters.Key<String>("serviceId")
-private val isRunningKey  = ActionParameters.Key<Boolean>("isRunning")
 
 class RefreshActionWidget : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
+        Log.d(TAG, "RefreshActionWidget: triggered")
         ServiceWidget().update(context, glanceId)
     }
 }
@@ -375,6 +414,7 @@ class RefreshActionWidget : ActionCallback {
 class ToggleMuteAction : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
         val serviceId = parameters[serviceIdKey] ?: return
+        Log.d(TAG, "ToggleMuteAction: serviceId=$serviceId")
         ServiceManager(context).toggleMute(serviceId)
         ServiceWidget().update(context, glanceId)
     }
@@ -382,9 +422,40 @@ class ToggleMuteAction : ActionCallback {
 
 class TogglePowerAction : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
-        val serviceId = parameters[serviceIdKey] ?: return
-        val isRunning = parameters[isRunningKey] ?: false
-        ServiceManager(context).togglePower(serviceId, isRunning)
-        ServiceWidget().update(context, glanceId)
+        val serviceId = parameters[serviceIdKey] ?: run {
+            Log.w(TAG, "TogglePowerAction: missing serviceId")
+            return
+        }
+        Log.d(TAG, "TogglePowerAction: serviceId=$serviceId")
+
+        val manager = ServiceManager(context)
+        val service = manager.getSavedServices().find { it.id == serviceId } ?: run {
+            Log.w(TAG, "TogglePowerAction: service not found: $serviceId")
+            return
+        }
+
+        // Re-check actual current status — never trust stale widget display state
+        val currentStatus    = manager.checkStatus(service)
+        val isCurrentlyRunning = currentStatus.status == RunStatus.RUNNING ||
+                                 currentStatus.status == RunStatus.ACTIVE
+        Log.d(TAG, "TogglePowerAction: ${service.label} currentlyRunning=$isCurrentlyRunning")
+
+        // Mark pending before sending command so next render shows feedback
+        manager.markPending(serviceId)
+        ServiceWidget().update(context, glanceId)  // immediate: show pending state
+
+        // Send the actual command to Termux
+        manager.togglePower(serviceId, isCurrentlyRunning)
+
+        // Wait for the service to respond, re-check, track uptime, clear pending
+        delay(2500)
+        val newStatus     = manager.checkStatus(service)
+        val isNowRunning  = newStatus.status == RunStatus.RUNNING || newStatus.status == RunStatus.ACTIVE
+        when {
+            isNowRunning && !isCurrentlyRunning -> manager.recordStartTime(serviceId)
+            !isNowRunning && isCurrentlyRunning -> manager.clearStartTime(serviceId)
+        }
+        manager.clearPending(serviceId)
+        ServiceWidget().update(context, glanceId)  // final: show real new status
     }
 }
