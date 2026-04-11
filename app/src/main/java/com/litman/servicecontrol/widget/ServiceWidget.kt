@@ -326,47 +326,31 @@ private fun WidgetServiceRow(
             }
         }
 
-        // ── Open in browser (only for services with a URL) ────
-        if (isRunning && !isPending && service.canOpen && service.openUrl != null) {
-            Spacer(GlanceModifier.width(6.dp))
-            Box(
-                modifier = GlanceModifier
-                    .size((settings.nameSize * 2.2f).dp)
-                    .background(ColorProvider(Color(0xFF0E1A22)))
-                    .cornerRadius(8.dp)
-                    .clickable(
-                        actionStartActivity(
-                            Intent(Intent.ACTION_VIEW, Uri.parse(service.openUrl))
-                        )
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "↗",
-                    style = TextStyle(
-                        color      = ColorProvider(Color(0xFF2A6080)),
-                        fontSize   = (settings.nameSize * 0.9f).sp,
-                        fontFamily = font
-                    )
-                )
-            }
-            Spacer(GlanceModifier.width(8.dp))
-        }
+        // ── Actions ──────────────────────────────────────────
+        val actionTextSize = (settings.metaSize * 0.9f).sp
+        val actionFont     = font
+        val isRunning      = runtime.status == RunStatus.RUNNING || runtime.status == RunStatus.ACTIVE
 
-        // ── Power button ──────────────────────────────────────
-        val btnSize = (settings.nameSize * 2.2f).dp
-        val touchTarget = 44.dp
-        
-        Box(
-            modifier = GlanceModifier
-                .size(touchTarget)
-                .clickable(
-                    actionRunCallback<TogglePowerAction>(
-                        actionParametersOf(serviceIdKey to service.id)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // ── Open Link ──
+            if (isRunning && !isPending && service.canOpen && service.openUrl != null) {
+                Box(
+                    modifier = GlanceModifier
+                        .padding(end = 6.dp)
+                        .background(ColorProvider(Color(0xFF161C22)))
+                        .cornerRadius(6.dp)
+                        .clickable(actionStartActivity(Intent(Intent.ACTION_VIEW, Uri.parse(service.openUrl)))),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "OPEN",
+                        modifier = GlanceModifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        style = TextStyle(color = ColorProvider(Color(0xFF3399FF)), fontSize = actionTextSize, fontWeight = FontWeight.Bold, fontFamily = actionFont)
                     )
-                ),
-            contentAlignment = Alignment.Center
-        ) {
+                }
+            }
+
+            // ── Power Button (Text Chip) ──
             val btnBg = when {
                 isPending -> Color(0xFF1A1A22)
                 isRunning -> Color(theme.accentBg)
@@ -375,25 +359,25 @@ private fun WidgetServiceRow(
             val btnFg = when {
                 isPending -> Color(0xFF353545)
                 isRunning -> accent
-                isUnknown -> Color(0xFF3A3A4A)
                 else      -> Color(0xFFBB3333)
+            }
+            val btnLabel = when {
+                isPending -> "···"
+                isRunning -> "STOP"
+                else      -> "START"
             }
 
             Box(
                 modifier = GlanceModifier
-                    .size(btnSize)
                     .background(ColorProvider(btnBg))
-                    .cornerRadius(8.dp),
+                    .cornerRadius(6.dp)
+                    .clickable(actionRunCallback<TogglePowerAction>(actionParametersOf(serviceIdKey to service.id))),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = if (isPending) "·" else "⏻",
-                    style = TextStyle(
-                        color      = ColorProvider(btnFg),
-                        fontSize   = (settings.nameSize * 1.0f).sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = font
-                    )
+                    text = btnLabel,
+                    modifier = GlanceModifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    style = TextStyle(color = ColorProvider(btnFg), fontSize = actionTextSize, fontWeight = FontWeight.Bold, fontFamily = actionFont)
                 )
             }
         }

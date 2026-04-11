@@ -103,6 +103,7 @@ fun ServiceControlApp(manager: ServiceManager) {
         settings = new
         manager.saveWidgetSettings(new)
         Log.d(TAG, "updateSettings: saved opacity=${new.opacity} font=${new.fontStyle} theme=${new.theme}")
+        // IMPORTANT: We do NOT call applySettings() here to avoid widget thrashing
     }
 
     // Push saved settings to widget — called on slider release / toggle / picker select
