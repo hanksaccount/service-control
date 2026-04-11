@@ -75,7 +75,7 @@ private fun WidgetRoot(
     ) {
         // Header
         Row(
-            modifier = GlanceModifier.fillMaxWidth().padding(bottom = settings.padding.dp),
+            modifier = GlanceModifier.fillMaxWidth().padding(bottom = (settings.padding * 0.8f).dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = GlanceModifier.defaultWeight()) {
@@ -117,16 +117,55 @@ private fun WidgetRoot(
             }
         }
 
-        if (services.isEmpty()) {
+        // Horizontal Separator
+        Box(
+            modifier = GlanceModifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(ColorProvider(Color(0xFF22222D)))
+        ) {}
+        
+        Spacer(GlanceModifier.height((settings.padding * 0.8f).dp))
+
+        // Table Header (PM2 style)
+        Row(
+            modifier = GlanceModifier.fillMaxWidth().padding(bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "SERVICE",
+                modifier = GlanceModifier.defaultWeight(),
+                style = TextStyle(
+                    color = ColorProvider(Color(0xFF555562)), 
+                    fontSize = (settings.metaSize * 0.85f).sp, 
+                    fontWeight = FontWeight.Bold
+                )
+            )
             Box(
-                modifier = GlanceModifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
+                modifier = GlanceModifier.width(60.dp),
+                contentAlignment = Alignment.CenterEnd
             ) {
                 Text(
-                    text = "Inga tjänster",
-                    style = TextStyle(color = ColorProvider(Color(0xFF44444C)), fontSize = settings.nameSize.sp)
+                    text = "ACTION",
+                    style = TextStyle(
+                        color = ColorProvider(Color(0xFF555562)), 
+                        fontSize = (settings.metaSize * 0.85f).sp, 
+                        fontWeight = FontWeight.Bold
+                    )
                 )
             }
+        }
+
+        if (services.isEmpty()) {
+            Text(
+                text = "> 0 active processes",
+                modifier = GlanceModifier.padding(top = 4.dp),
+                style = TextStyle(
+                    color = ColorProvider(Color(0xFF6B6B76)), 
+                    fontSize = settings.metaSize.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            )
         } else {
             services.forEach { service ->
                 val runtime = runtimes[service.id] ?: ServiceRuntime.UNKNOWN
