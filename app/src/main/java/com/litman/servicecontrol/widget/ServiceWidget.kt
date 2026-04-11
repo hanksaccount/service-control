@@ -30,6 +30,7 @@ class ServiceWidget : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val manager = ServiceManager(context)
         val allSaved = manager.getSavedServices()
+        val widgetSettings = manager.getWidgetSettings()
         
         // Filter: only WEB_PANEL and HYBRID, and only widget-enabled
         val servicesToShow = allSaved.filter { 
@@ -47,7 +48,8 @@ class ServiceWidget : GlanceAppWidget() {
                 services = servicesToShow,
                 runtimes = runtimes,
                 activeCount = activeCount,
-                totalCount = allSaved.count { it.group == ServiceGroup.PANELS }
+                totalCount = allSaved.count { it.group == ServiceGroup.PANELS },
+                settings = widgetSettings
             )
         }
     }
@@ -58,18 +60,22 @@ private fun WidgetRoot(
     services: List<ServiceItem>,
     runtimes: Map<String, ServiceRuntime>,
     activeCount: Int,
-    totalCount: Int
+    totalCount: Int,
+    settings: WidgetSettings
 ) {
+    val bgColor = Color(red = 13, green = 13, blue = 17, alpha = settings.opacity)
+
     // Dark base matching shortcut-board aesthetic
     Column(
         modifier = GlanceModifier
             .fillMaxSize()
-            .background(ColorProvider(Color(0xFF0D0D11)))
-            .padding(16.dp)
+            .background(ColorProvider(bgColor))
+            .cornerRadius(settings.cornerRadius.dp)
+            .padding(settings.padding.dp)
     ) {
         // Header
         Row(
-            modifier = GlanceModifier.fillMaxWidth().padding(bottom = 16.dp),
+            modifier = GlanceModifier.fillMaxWidth().padding(bottom = settings.padding.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = GlanceModifier.defaultWeight()) {
@@ -77,7 +83,7 @@ private fun WidgetRoot(
                     text = "SERVICE CONTROL",
                     style = TextStyle(
                         color = ColorProvider(Color(0xFFE2E2E9)),
-                        fontSize = 10.sp,
+                        fontSize = (settings.nameSize * 0.7f).sp,
                         fontWeight = FontWeight.Bold
                     )
                 )
@@ -85,7 +91,7 @@ private fun WidgetRoot(
                     text = "TERMUX / PM2",
                     style = TextStyle(
                         color = ColorProvider(Color(0xFF6B6B76)),
-                        fontSize = 8.sp,
+                        fontSize = (settings.metaSize * 0.8f).sp,
                         fontWeight = FontWeight.Bold
                     )
                 )
@@ -118,13 +124,13 @@ private fun WidgetRoot(
             ) {
                 Text(
                     text = "Inga tjänster",
-                    style = TextStyle(color = ColorProvider(Color(0xFF44444C)), fontSize = 12.sp)
+                    style = TextStyle(color = ColorProvider(Color(0xFF44444C)), fontSize = settings.nameSize.sp)
                 )
             }
         } else {
             services.forEach { service ->
                 val runtime = runtimes[service.id] ?: ServiceRuntime.UNKNOWN
-                ServiceWidgetRow(service, runtime)
+                ServiceWidgetRow(service, runtime, settings)
                 Spacer(GlanceModifier.height(14.dp)) // Spacing for "luftig" feel
             }
         }
@@ -132,7 +138,7 @@ private fun WidgetRoot(
 }
 
 @Composable
-private fun ServiceWidgetRow(service: ServiceItem, runtime: ServiceRuntime) {
+private fun ServiceWidgetRow(service: ServiceItem, runtime: ServiceRuntime, settings: WidgetSettings) {
     val isRunning = runtime.status == RunStatus.RUNNING || runtime.status == RunStatus.ACTIVE
     val statusText = if (isRunning) "online" else "offline"
     val statusColor = if (isRunning) Color(0xFF00E676) else Color(0xFFFF4444)
@@ -154,7 +160,7 @@ private fun ServiceWidgetRow(service: ServiceItem, runtime: ServiceRuntime) {
                     text = service.label.lowercase(),
                     style = TextStyle(
                         color = ColorProvider(nameColor),
-                        fontSize = 14.sp,
+                        fontSize = settings.nameSize.sp,
                         fontWeight = FontWeight.Medium
                     )
                 )
@@ -167,32 +173,32 @@ private fun ServiceWidgetRow(service: ServiceItem, runtime: ServiceRuntime) {
                 // Mode
                 Text(
                     text = "fork",
-                    style = TextStyle(color = ColorProvider(Color(0xFF6B6B76)), fontSize = 10.sp)
+                    style = TextStyle(color = ColorProvider(Color(0xFF6B6B76)), fontSize = settings.metaSize.sp)
                 )
                 
                 // Bullet
                 Text(
                     text = " • ",
-                    style = TextStyle(color = ColorProvider(Color(0xFF33333C)), fontSize = 10.sp)
+                    style = TextStyle(color = ColorProvider(Color(0xFF33333C)), fontSize = settings.metaSize.sp)
                 )
                 
                 // Status
                 Text(
                     text = statusText,
-                    style = TextStyle(color = ColorProvider(statusColor), fontSize = 10.sp, fontWeight = FontWeight.Medium)
+                    style = TextStyle(color = ColorProvider(statusColor), fontSize = settings.metaSize.sp, fontWeight = FontWeight.Medium)
                 )
                 
                 // Bullet
                 if (isRunning) {
                     Text(
                         text = " • ",
-                        style = TextStyle(color = ColorProvider(Color(0xFF33333C)), fontSize = 10.sp)
+                        style = TextStyle(color = ColorProvider(Color(0xFF33333C)), fontSize = settings.metaSize.sp)
                     )
                     
                     // Memory
                     Text(
                         text = memoryText,
-                        style = TextStyle(color = ColorProvider(Color(0xFF6B6B76)), fontSize = 10.sp)
+                        style = TextStyle(color = ColorProvider(Color(0xFF6B6B76)), fontSize = settings.metaSize.sp)
                     )
                 }
             }
@@ -214,14 +220,14 @@ private fun ServiceWidgetRow(service: ServiceItem, runtime: ServiceRuntime) {
                     )),
                 style = TextStyle(
                     color = ColorProvider(notisColor),
-                    fontSize = 12.sp
+                    fontSize = (settings.metaSize * 1.2f).sp
                 )
             )
 
             // Power Action Button
             Box(
                 modifier = GlanceModifier
-                    .size(32.dp)
+                    .size((settings.nameSize * 2.2f).dp)
                     .background(ColorProvider(powerBg))
                     .cornerRadius(8.dp)
                     .clickable(actionRunCallback<TogglePowerAction>(
@@ -236,7 +242,7 @@ private fun ServiceWidgetRow(service: ServiceItem, runtime: ServiceRuntime) {
                     text = "⏻",
                     style = TextStyle(
                         color = ColorProvider(powerFg),
-                        fontSize = 16.sp,
+                        fontSize = (settings.nameSize * 1.1f).sp,
                         fontWeight = FontWeight.Bold
                     )
                 )

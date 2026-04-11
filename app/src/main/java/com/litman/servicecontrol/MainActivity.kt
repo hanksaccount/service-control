@@ -16,7 +16,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.glance.appwidget.updateAll
 import com.litman.servicecontrol.model.*
+import com.litman.servicecontrol.widget.ServiceWidget
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -42,6 +44,8 @@ fun ServiceControlApp(manager: ServiceManager) {
     var services by remember { mutableStateOf(manager.getSavedServices()) }
     val runtimes = remember { mutableStateMapOf<String, ServiceRuntime>() }
     val scope = rememberCoroutineScope()
+    var settings by remember { mutableStateOf(manager.getWidgetSettings()) }
+    var showSettings by remember { mutableStateOf(false) }
 
     fun refreshAll() {
         scope.launch {
@@ -52,6 +56,18 @@ fun ServiceControlApp(manager: ServiceManager) {
         }
     }
 
+    fun updateWidget() {
+        scope.launch {
+            ServiceWidget().updateAll(manager.context)
+        }
+    }
+
+    fun updateSettings(newSettings: WidgetSettings) {
+        settings = newSettings
+        manager.saveWidgetSettings(newSettings)
+        updateWidget()
+    }
+
     LaunchedEffect(Unit) {
         while(true) {
             refreshAll()
@@ -60,28 +76,86 @@ fun ServiceControlApp(manager: ServiceManager) {
     }
 
     Column(modifier = Modifier.padding(16.dp)) {
-        Text("SERVICE CONTROL", fontSize = 20.sp, fontWeight = FontWeight.Black, color = Color.White)
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text("SERVICE CONTROL", fontSize = 20.sp, fontWeight = FontWeight.Black, color = Color.White)
+            IconButton(onClick = { showSettings = !showSettings }) {
+                Text(if (showSettings) "✕" else "⚙", fontSize = 24.sp, color = Color(0xFF888888))
+            }
+        }
+        
         Spacer(modifier = Modifier.height(16.dp))
 
-        LazyColumn(modifier = Modifier.fillMaxSize()) {
-            val panels = services.filter { it.checkMode != StatusCheckMode.ACTION }
-            val actions = services.filter { it.checkMode == StatusCheckMode.ACTION }
-
-            if (panels.isNotEmpty()) {
-                item { SectionHeader("PANELER") }
-                items(panels) { service ->
-                    ServiceRow(service, runtimes[service.id] ?: ServiceRuntime.UNKNOWN, manager) { refreshAll() }
+        if (showSettings) {
+            LazyColumn(modifier = Modifier.fillMaxSize()) {
+                item { SectionHeader("WIDGET SETTINGS") }
+                
+                item {
+                    SettingSlider("Name Size (${settings.nameSize.toInt()})", settings.nameSize, 8f, 24f) { v -> 
+                        updateSettings(settings.copy(nameSize = v)) 
+                    }
+                }
+                item {
+                    SettingSlider("Meta Size (${settings.metaSize.toInt()})", settings.metaSize, 6f, 18f) { v -> 
+                        updateSettings(settings.copy(metaSize = v)) 
+                    }
+                }
+                item {
+                    SettingSlider("Padding (${settings.padding.toInt()})", settings.padding, 0f, 32f) { v -> 
+                        updateSettings(settings.copy(padding = v)) 
+                    }
+                }
+                item {
+                    SettingSlider("Corner Radius (${settings.cornerRadius.toInt()})", settings.cornerRadius, 0f, 32f) { v -> 
+                        updateSettings(settings.copy(cornerRadius = v)) 
+                    }
+                }
+                item {
+                    SettingSlider("Opacity (${settings.opacity})", settings.opacity.toFloat(), 0f, 255f) { v -> 
+                        updateSettings(settings.copy(opacity = v.toInt())) 
+                    }
                 }
             }
+        } else {
+            LazyColumn(modifier = Modifier.fillMaxSize()) {
+                val panels = services.filter { it.checkMode != StatusCheckMode.ACTION }
+                val actions = services.filter { it.checkMode == StatusCheckMode.ACTION }
 
-            if (actions.isNotEmpty()) {
-                item { Spacer(Modifier.height(24.dp)) }
-                item { SectionHeader("ACTIONS") }
-                items(actions) { action ->
-                    ActionRow(action, manager) { refreshAll() }
+                if (panels.isNotEmpty()) {
+                    item { SectionHeader("PANELER") }
+                    items(panels) { service ->
+                        ServiceRow(service, runtimes[service.id] ?: ServiceRuntime.UNKNOWN, manager) { 
+                            refreshAll()
+                            updateWidget()
+                        }
+                    }
+                }
+
+                if (actions.isNotEmpty()) {
+                    item { Spacer(Modifier.height(24.dp)) }
+                    item { SectionHeader("ACTIONS") }
+                    items(actions) { action ->
+                        ActionRow(action, manager) { refreshAll() }
+                    }
                 }
             }
         }
+    }
+}
+
+@Composable
+fun SettingSlider(label: String, value: Float, min: Float, max: Float, onValueChange: (Float) -> Unit) {
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+        Text(label, color = Color.White, fontSize = 14.sp)
+        Slider(
+            value = value,
+            onValueChange = onValueChange,
+            valueRange = min..max,
+            colors = SliderDefaults.colors(
+                thumbColor = Color(0xFF00E676),
+                activeTrackColor = Color(0xFF00E676),
+                inactiveTrackColor = Color(0xFF333333)
+            )
+        )
     }
 }
 

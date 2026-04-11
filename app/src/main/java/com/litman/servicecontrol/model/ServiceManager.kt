@@ -65,7 +65,15 @@ object TemplateRegistry {
     fun find(name: String) = templates.find { it.name == name }
 }
 
-class ServiceManager(private val context: Context) {
+data class WidgetSettings(
+    var nameSize: Float = 14f,
+    var metaSize: Float = 10f,
+    var padding: Float = 16f,
+    var opacity: Int = 255,
+    var cornerRadius: Float = 8f
+)
+
+class ServiceManager(val context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("services_config", Context.MODE_PRIVATE)
     private val gson = Gson()
     private val client = HttpClient(Android) {
@@ -73,6 +81,15 @@ class ServiceManager(private val context: Context) {
             connectTimeout = 1000
             socketTimeout = 1000
         }
+    }
+
+    fun getWidgetSettings(): WidgetSettings {
+        val json = prefs.getString("widget_settings", "{}")
+        return gson.fromJson(json, WidgetSettings::class.java) ?: WidgetSettings()
+    }
+
+    fun saveWidgetSettings(settings: WidgetSettings) {
+        prefs.edit().putString("widget_settings", gson.toJson(settings)).apply()
     }
 
     fun getSavedServices(): List<ServiceItem> {
