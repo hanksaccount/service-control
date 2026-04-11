@@ -420,28 +420,46 @@ class TogglePowerAction : ActionCallback {
         Log.d(TAG, "[ServiceCtrl] Widget Action ENTERED: id=$serviceId")
 
         val manager = ServiceManager(context)
-        val service = manager.getSavedServices().find { it.id == serviceId } ?: return
+        val services = manager.getSavedServices()
+        val service = services.find { it.id == serviceId } ?: return
 
         // 1. Re-check actual status to determine direction
-        val currentStatus    = manager.checkStatus(service)
+        val currentStatus = manager.checkStatus(service)
         val isCurrentlyRunning = currentStatus.status == RunStatus.RUNNING || 
                                  currentStatus.status == RunStatus.DEGRADED
         
-        // 2. OMEDELBAR FEEDBACK (markStarting/markStopping)
+        // 2. OMEDELBAR FEEDBACK (Optimistic)
         if (isCurrentlyRunning) manager.markStopping(serviceId) else manager.markStarting(serviceId)
         ServiceWidget().updateAll(context) 
 
         // 3. Command execution
-        Log.d(TAG, "[ServiceCtrl] Widget Action TOGGLE: id=$serviceId calling togglePower(isRunning=$isCurrentlyRunning)")
         manager.togglePower(serviceId, isCurrentlyRunning)
 
-        // 4. Final verification & Global Sync
-        delay(1500)
-        val newStatus = manager.checkStatus(service)
-        Log.d(TAG, "[ServiceCtrl] Widget Action FINAL: id=$serviceId newStatus=${newStatus.status}")
+        // 4. Robust Verification Loop (10 attempts = 10s)
+        var reachedTarget = false
+        val targetStopped = isCurrentlyRunning // If it was running, we want it stopped
         
-        // Clear pending so reality (from cache or live) can take over
+        for (i in 1..10) {
+            delay(1000)
+            val finalStatus = manager.checkAndCacheStatus(service)
+            
+            reachedTarget = if (targetStopped) {
+                finalStatus.status == RunStatus.STOPPED
+            } else {
+                finalStatus.status == RunStatus.RUNNING || finalStatus.status == RunStatus.DEGRADED
+            }
+            
+            if (reachedTarget) {
+                Log.d(TAG, "[ServiceCtrl] Widget Action: Target reached in attempt $i")
+                break
+            }
+        }
+        
+        // 5. Cleanup
         manager.clearPending(serviceId)
+        if (!reachedTarget) {
+            Log.w(TAG, "[ServiceCtrl] Widget Action: Timeout (10s) reached for $serviceId. Target state not confirmed.")
+        }
         ServiceWidget().updateAll(context)
     }
 }

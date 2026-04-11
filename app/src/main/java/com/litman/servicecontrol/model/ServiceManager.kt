@@ -211,12 +211,16 @@ class ServiceManager(val context: Context) {
 
     fun markStarting(serviceId: String) {
         prefs.edit().putString("pending_$serviceId", "STARTING").commit()
-        Log.d(TAG, "[ServiceCtrl] markStarting: $serviceId")
+        // Optimistic cache update for immediate widget/app feedback
+        updateSingleCachedStatus(serviceId, ServiceRuntime(RunStatus.STARTING))
+        Log.d(TAG, "[ServiceCtrl] markStarting: $serviceId (optimistic cache set)")
     }
 
     fun markStopping(serviceId: String) {
         prefs.edit().putString("pending_$serviceId", "STOPPING").commit()
-        Log.d(TAG, "[ServiceCtrl] markStopping: $serviceId")
+        // Optimistic cache update for immediate widget/app feedback
+        updateSingleCachedStatus(serviceId, ServiceRuntime(RunStatus.STOPPING))
+        Log.d(TAG, "[ServiceCtrl] markStopping: $serviceId (optimistic cache set)")
     }
 
     fun clearPending(serviceId: String) {
@@ -307,6 +311,19 @@ class ServiceManager(val context: Context) {
         StatusCheckMode.ACTION  -> ServiceRuntime.UNKNOWN
         StatusCheckMode.PORT    -> checkTcpPorts(item.ports)
         StatusCheckMode.PROCESS -> checkProcess(item)
+    }
+
+    /** Performs checkStatus and persists the result to the global cache. */
+    suspend fun checkAndCacheStatus(item: ServiceItem): ServiceRuntime {
+        val runtime = checkStatus(item)
+        updateSingleCachedStatus(item.id, runtime)
+        return runtime
+    }
+
+    private fun updateSingleCachedStatus(id: String, runtime: ServiceRuntime) {
+        val current = getCachedStatuses().toMutableMap()
+        current[id] = runtime
+        saveCachedStatuses(current)
     }
 
     private suspend fun checkTcpPorts(ports: List<Int>): ServiceRuntime {

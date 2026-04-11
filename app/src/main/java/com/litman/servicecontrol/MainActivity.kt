@@ -90,12 +90,29 @@ fun ServiceControlApp(manager: ServiceManager) {
         scope.launch {
             services = manager.getSavedServices()
             val statuses = manager.checkAllStatuses(services)
-            statuses.forEach { (id, rt) -> runtimes[id] = rt }
             
-            // Clean up local pending states if they match reality
             services.forEach { s ->
-                val p = manager.getPendingState(s.id)
-                if (p != null) pendingStates[s.id] = p else pendingStates.remove(s.id)
+                val runtime = statuses[s.id] ?: ServiceRuntime.UNKNOWN
+                runtimes[s.id] = runtime
+                
+                // Clear pending if reality matches target
+                val pending = manager.getPendingState(s.id)
+                if (pending != null) {
+                    val reachedTarget = if (pending == "STOPPING") {
+                        runtime.status == RunStatus.STOPPED
+                    } else {
+                        runtime.status == RunStatus.RUNNING || runtime.status == RunStatus.DEGRADED
+                    }
+                    
+                    if (reachedTarget) {
+                        manager.clearPending(s.id)
+                        pendingStates.remove(s.id)
+                    } else {
+                        pendingStates[s.id] = pending
+                    }
+                } else {
+                    pendingStates.remove(s.id)
+                }
             }
         }
     }
@@ -171,9 +188,10 @@ fun ServiceControlApp(manager: ServiceManager) {
             ServiceListPane(
                 services        = services,
                 runtimes        = runtimes,
-                pendingServices = pendingServices,
+                pendingStates   = pendingStates,
                 manager         = manager,
-                onRefresh       = { refreshAll(); pushWidget() }
+                onRefresh       = ::refreshAll,
+                onPushWidget    = ::pushWidget
             )
         }
     }
@@ -465,9 +483,10 @@ fun ThemeCard(
 fun ServiceListPane(
     services: List<ServiceItem>,
     runtimes: Map<String, ServiceRuntime>,
-    pendingServices: MutableMap<String, Boolean>,
+    pendingStates: Map<String, String>,
     manager: ServiceManager,
-    onRefresh: () -> Unit
+    onRefresh: () -> Unit,
+    onPushWidget: () -> Unit
 ) {
     val panels  = services.filter { it.checkMode != StatusCheckMode.ACTION }
     val actions = services.filter { it.checkMode == StatusCheckMode.ACTION }
@@ -477,12 +496,12 @@ fun ServiceListPane(
             item { SectionLabel("PROCESSES") }
             items(panels) { service ->
                 ServiceRow(
-                    service    = service,
-                    runtime    = runtimes[service.id] ?: ServiceRuntime.UNKNOWN,
-                    isPending  = pendingServices[service.id] == true,
-                    manager    = manager,
-                    onPending  = { id, v -> pendingServices[id] = v },
-                    onRefresh  = onRefresh
+                    service      = service,
+                    runtime      = runtimes[service.id] ?: ServiceRuntime.UNKNOWN,
+                    isPending    = pendingStates.containsKey(service.id),
+                    manager      = manager,
+                    onRefresh    = onRefresh,
+                    onPushWidget = onPushWidget
                 )
             }
         }
@@ -501,8 +520,8 @@ fun ServiceRow(
     runtime: ServiceRuntime,
     isPending: Boolean,
     manager: ServiceManager,
-    onPending: (String, Boolean) -> Unit,
-    onRefresh: () -> Unit
+    onRefresh: () -> Unit,
+    onPushWidget: () -> Unit
 ) {
     val scope      = rememberCoroutineScope()
     val isRunning  = runtime.status == RunStatus.RUNNING || runtime.status == RunStatus.DEGRADED
@@ -583,8 +602,8 @@ fun ServiceRow(
                             
                             // Visual feedback loop: Wait for Termux + verify
                             delay(1500)
-                            refreshAll()
-                            pushWidget()
+                            onRefresh()
+                            onPushWidget()
                         }
                     } else Modifier
                 )
