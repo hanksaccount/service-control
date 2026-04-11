@@ -107,7 +107,6 @@ fun ServiceControlApp(manager: ServiceManager) {
         }
     }
 
-    // Save and Apply settings (Commit to disk + Update Widget)
     fun commitSettings(new: WidgetSettings) {
         settings = new
         manager.saveWidgetSettings(new)
@@ -115,6 +114,7 @@ fun ServiceControlApp(manager: ServiceManager) {
         pushWidget()
     }
 
+    LaunchedEffect(Unit) {
         while (true) { refreshAll(); delay(15_000) }
     }
 

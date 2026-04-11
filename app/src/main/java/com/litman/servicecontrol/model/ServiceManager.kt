@@ -387,6 +387,15 @@ class ServiceManager(val context: Context) {
         sendTermuxCommand(arrayOf("-c", fullCmd))
     }
 
+    fun toggleMute(serviceId: String) {
+        val services = getSavedServices().toMutableList()
+        val idx = services.indexOfFirst { it.id == serviceId }
+        if (idx != -1) {
+            services[idx] = services[idx].copy(isMuted = !services[idx].isMuted)
+            saveServices(services)
+        }
+    }
+
     fun togglePower(serviceId: String, isRunning: Boolean) {
         val services = getSavedServices().toMutableList()
         val idx = services.indexOfFirst { it.id == serviceId }
