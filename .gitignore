@@ -1,0 +1,16 @@
+# Gradle
+.gradle/
+build/
+app/build/
+*.lock
+*.bin
+
+# Android
+.navigation/
+captures/
+.externalNativeBuild
+.cxx
+local.properties
+.idea/
+*.iml
+.DS_Store
