@@ -339,7 +339,6 @@ private fun WidgetServiceRow(
         // ── Actions ──────────────────────────────────────────
         val actionTextSize = (settings.metaSize * 0.9f).sp
         val actionFont     = font
-        val isRunning      = runtime.status == RunStatus.RUNNING || runtime.status == RunStatus.DEGRADED
 
         Row(verticalAlignment = Alignment.CenterVertically) {
             // ── Open Link ──
@@ -428,12 +427,10 @@ class TogglePowerAction : ActionCallback {
         val isCurrentlyRunning = currentStatus.status == RunStatus.RUNNING || 
                                  currentStatus.status == RunStatus.DEGRADED
         
-        // 2. OMEDELBAR FEEDBACK (Optimistic)
-        if (isCurrentlyRunning) manager.markStopping(serviceId) else manager.markStarting(serviceId)
-        ServiceWidget().updateAll(context) 
-
-        // 3. Command execution
+        // 2. Command execution — togglePower marks pending (STARTING/STOPPING) internally
         manager.togglePower(serviceId, isCurrentlyRunning)
+        // Immediate visual feedback: widget reflects pending state set by togglePower
+        ServiceWidget().updateAll(context)
 
         // 4. Robust Verification Loop (10 attempts = 10s)
         var reachedTarget = false
