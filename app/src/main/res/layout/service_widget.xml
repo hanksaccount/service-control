@@ -22,16 +22,16 @@
                 android:id="@+id/widget_title"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:fontFamily="sans-serif"
                 android:includeFontPadding="false"
+                android:textColor="#F4F7FA"
                 android:textStyle="bold" />
 
             <TextView
                 android:id="@+id/widget_summary"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:fontFamily="sans-serif"
-                android:includeFontPadding="false" />
+                android:includeFontPadding="false"
+                android:textColor="#A8B3BD" />
         </LinearLayout>
 
         <TextView
@@ -54,45 +54,185 @@
 
     <LinearLayout
         android:id="@+id/widget_row_1"
-        style="@style/ServiceWidgetRow">
-        <View android:id="@+id/widget_row_1_indicator" style="@style/ServiceWidgetIndicator" />
-        <LinearLayout style="@style/ServiceWidgetTextColumn">
-            <TextView android:id="@+id/widget_row_1_name" style="@style/ServiceWidgetName" />
-            <TextView android:id="@+id/widget_row_1_meta" style="@style/ServiceWidgetMeta" />
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="8dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+        <View
+            android:id="@+id/widget_row_1_indicator"
+            android:layout_width="4dp"
+            android:layout_height="32dp"
+            android:layout_marginEnd="10dp" />
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+            <TextView
+                android:id="@+id/widget_row_1_name"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:textColor="#F4F7FA"
+                android:textStyle="bold" />
+            <TextView
+                android:id="@+id/widget_row_1_meta"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:textColor="#A8B3BD" />
         </LinearLayout>
-        <TextView android:id="@+id/widget_row_1_action" style="@style/ServiceWidgetAction" />
+        <TextView
+            android:id="@+id/widget_row_1_action"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="#151D24"
+            android:gravity="center"
+            android:minWidth="56dp"
+            android:paddingLeft="10dp"
+            android:paddingRight="10dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp"
+            android:textColor="#A8B3BD"
+            android:textStyle="bold" />
     </LinearLayout>
 
     <LinearLayout
         android:id="@+id/widget_row_2"
-        style="@style/ServiceWidgetRow">
-        <View android:id="@+id/widget_row_2_indicator" style="@style/ServiceWidgetIndicator" />
-        <LinearLayout style="@style/ServiceWidgetTextColumn">
-            <TextView android:id="@+id/widget_row_2_name" style="@style/ServiceWidgetName" />
-            <TextView android:id="@+id/widget_row_2_meta" style="@style/ServiceWidgetMeta" />
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="8dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+        <View
+            android:id="@+id/widget_row_2_indicator"
+            android:layout_width="4dp"
+            android:layout_height="32dp"
+            android:layout_marginEnd="10dp" />
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+            <TextView
+                android:id="@+id/widget_row_2_name"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:textColor="#F4F7FA"
+                android:textStyle="bold" />
+            <TextView
+                android:id="@+id/widget_row_2_meta"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:textColor="#A8B3BD" />
         </LinearLayout>
-        <TextView android:id="@+id/widget_row_2_action" style="@style/ServiceWidgetAction" />
+        <TextView
+            android:id="@+id/widget_row_2_action"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="#151D24"
+            android:gravity="center"
+            android:minWidth="56dp"
+            android:paddingLeft="10dp"
+            android:paddingRight="10dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp"
+            android:textColor="#A8B3BD"
+            android:textStyle="bold" />
     </LinearLayout>
 
     <LinearLayout
         android:id="@+id/widget_row_3"
-        style="@style/ServiceWidgetRow">
-        <View android:id="@+id/widget_row_3_indicator" style="@style/ServiceWidgetIndicator" />
-        <LinearLayout style="@style/ServiceWidgetTextColumn">
-            <TextView android:id="@+id/widget_row_3_name" style="@style/ServiceWidgetName" />
-            <TextView android:id="@+id/widget_row_3_meta" style="@style/ServiceWidgetMeta" />
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="8dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+        <View
+            android:id="@+id/widget_row_3_indicator"
+            android:layout_width="4dp"
+            android:layout_height="32dp"
+            android:layout_marginEnd="10dp" />
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+            <TextView
+                android:id="@+id/widget_row_3_name"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:textColor="#F4F7FA"
+                android:textStyle="bold" />
+            <TextView
+                android:id="@+id/widget_row_3_meta"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:textColor="#A8B3BD" />
         </LinearLayout>
-        <TextView android:id="@+id/widget_row_3_action" style="@style/ServiceWidgetAction" />
+        <TextView
+            android:id="@+id/widget_row_3_action"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="#151D24"
+            android:gravity="center"
+            android:minWidth="56dp"
+            android:paddingLeft="10dp"
+            android:paddingRight="10dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp"
+            android:textColor="#A8B3BD"
+            android:textStyle="bold" />
     </LinearLayout>
 
     <LinearLayout
         android:id="@+id/widget_row_4"
-        style="@style/ServiceWidgetRow">
-        <View android:id="@+id/widget_row_4_indicator" style="@style/ServiceWidgetIndicator" />
-        <LinearLayout style="@style/ServiceWidgetTextColumn">
-            <TextView android:id="@+id/widget_row_4_name" style="@style/ServiceWidgetName" />
-            <TextView android:id="@+id/widget_row_4_meta" style="@style/ServiceWidgetMeta" />
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="8dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+        <View
+            android:id="@+id/widget_row_4_indicator"
+            android:layout_width="4dp"
+            android:layout_height="32dp"
+            android:layout_marginEnd="10dp" />
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+            <TextView
+                android:id="@+id/widget_row_4_name"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:textColor="#F4F7FA"
+                android:textStyle="bold" />
+            <TextView
+                android:id="@+id/widget_row_4_meta"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:textColor="#A8B3BD" />
         </LinearLayout>
-        <TextView android:id="@+id/widget_row_4_action" style="@style/ServiceWidgetAction" />
+        <TextView
+            android:id="@+id/widget_row_4_action"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="#151D24"
+            android:gravity="center"
+            android:minWidth="56dp"
+            android:paddingLeft="10dp"
+            android:paddingRight="10dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp"
+            android:textColor="#A8B3BD"
+            android:textStyle="bold" />
     </LinearLayout>
 </LinearLayout>

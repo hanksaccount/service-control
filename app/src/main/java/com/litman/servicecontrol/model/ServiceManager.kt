@@ -186,7 +186,7 @@ class ServiceManager(val context: Context) {
     private val termuxBash = "/data/data/com.termux/files/usr/bin/bash"
 
     // Bump this when buildDefaultServices() changes port/path/mode config.
-    private val SERVICES_VERSION = 8  // v8: force refresh of elpris/autosort contract-based start/stop config
+    private val SERVICES_VERSION = 9  // v9: force refresh after widget/provider cleanup
 
     // ── Settings ─────────────────────────────────────────────────────────────
 
