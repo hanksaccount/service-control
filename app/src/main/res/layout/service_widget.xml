@@ -45,7 +45,7 @@
             android:textStyle="bold" />
     </LinearLayout>
 
-    <View
+    <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="1dp"
         android:layout_marginTop="8dp"
@@ -59,7 +59,7 @@
         android:layout_marginBottom="8dp"
         android:gravity="center_vertical"
         android:orientation="horizontal">
-        <View
+        <FrameLayout
             android:id="@+id/widget_row_1_indicator"
             android:layout_width="4dp"
             android:layout_height="32dp"
@@ -105,7 +105,7 @@
         android:layout_marginBottom="8dp"
         android:gravity="center_vertical"
         android:orientation="horizontal">
-        <View
+        <FrameLayout
             android:id="@+id/widget_row_2_indicator"
             android:layout_width="4dp"
             android:layout_height="32dp"
@@ -151,7 +151,7 @@
         android:layout_marginBottom="8dp"
         android:gravity="center_vertical"
         android:orientation="horizontal">
-        <View
+        <FrameLayout
             android:id="@+id/widget_row_3_indicator"
             android:layout_width="4dp"
             android:layout_height="32dp"
@@ -197,7 +197,7 @@
         android:layout_marginBottom="8dp"
         android:gravity="center_vertical"
         android:orientation="horizontal">
-        <View
+        <FrameLayout
             android:id="@+id/widget_row_4_indicator"
             android:layout_width="4dp"
             android:layout_height="32dp"
