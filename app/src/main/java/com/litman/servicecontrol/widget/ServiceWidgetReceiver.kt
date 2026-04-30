@@ -26,16 +26,29 @@ class ServiceWidgetReceiver : AppWidgetProvider() {
 
     private fun handleWidgetAction(context: Context, intent: Intent) {
         val pending = goAsync()
+        val action = intent.action
+        val serviceId = intent.getStringExtra(ServiceWidget.EXTRA_SERVICE_ID)
+        
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                when (intent.action) {
+                when (action) {
                     ServiceWidget.ACTION_REFRESH -> ServiceWidget.refreshStatuses(context)
                     ServiceWidget.ACTION_TOGGLE -> {
-                        val serviceId = intent.getStringExtra(ServiceWidget.EXTRA_SERVICE_ID)
-                        if (serviceId != null) ServiceWidget.toggle(context, serviceId)
+                        if (serviceId != null) {
+                            // Launch a separate nested coroutine for the toggle itself
+                            // so that multiple clicks can be processed in parallel
+                            launch {
+                                ServiceWidget.toggle(context, serviceId)
+                            }
+                        }
                     }
                 }
+            } catch (t: Throwable) {
+                android.util.Log.e("ServiceCtrl", "handleWidgetAction failed", t)
             } finally {
+                // Note: goAsync stay alive until pending.finish()
+                // In a perfect world we'd wait for all child jobs, but for responsiveness
+                // we just want to ensure the triggers are sent.
                 pending.finish()
             }
         }

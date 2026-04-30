@@ -70,11 +70,18 @@ object ServiceWidget {
         val service = manager.getSavedServices().find { it.id == serviceId } ?: return
         val current = manager.checkAndCacheStatus(service)
         val isRunning = current.status == RunStatus.RUNNING || current.status == RunStatus.DEGRADED
+        
+        // Start the command immediately
         val commandStarted = manager.togglePower(serviceId, isRunning)
+        
+        // Update widget immediately to show the "pending" state
         updateAll(appContext)
+        
         if (!commandStarted) return
-        manager.waitForToggleCompletion(serviceId, isRunning)
-        updateAll(appContext)
+        
+        // We do NOT call waitForToggleCompletion here anymore as it blocks the coroutine.
+        // Instead, the background refresh or subsequent manual refreshes will catch the state change.
+        // Or we could launch a separate detached scope for waiting if we really want "active" polling.
     }
 
     private fun render(
