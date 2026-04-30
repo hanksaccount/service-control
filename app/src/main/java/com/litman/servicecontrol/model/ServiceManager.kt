@@ -150,7 +150,8 @@ data class WidgetSettings(
     val fontStyle: String   = "SANS",    // SANS | MONO
     val theme: String       = "GRAPHITE", // GRAPHITE | SLATE | DEEP_BLUE | SOFT_GREEN | AMBER | MONO
     val showMemory: Boolean  = true,
-    val showColumnHeaders: Boolean = true
+    val showColumnHeaders: Boolean = true,
+    val showNetworkUsage: Boolean = false
 )
 
 // ── Theme definitions ────────────────────────────────────────────────────────
@@ -209,7 +210,8 @@ class ServiceManager(val context: Context) {
                 fontStyle         = if (obj.has("fontStyle"))         obj["fontStyle"].asString        else d.fontStyle,
                 theme             = if (obj.has("theme"))             obj["theme"].asString            else if (obj.has("accentColor")) obj["accentColor"].asString else d.theme,
                 showMemory        = if (obj.has("showMemory"))        obj["showMemory"].asBoolean      else d.showMemory,
-                showColumnHeaders = if (obj.has("showColumnHeaders")) obj["showColumnHeaders"].asBoolean else d.showColumnHeaders
+                showColumnHeaders = if (obj.has("showColumnHeaders")) obj["showColumnHeaders"].asBoolean else d.showColumnHeaders,
+                showNetworkUsage  = if (obj.has("showNetworkUsage"))  obj["showNetworkUsage"].asBoolean  else d.showNetworkUsage
             )
             Log.d(TAG, "getWidgetSettings: opacity=${s.opacity} font=${s.fontStyle} theme=${s.theme}")
             s

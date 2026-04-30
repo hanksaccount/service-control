@@ -212,6 +212,7 @@ fun ServiceControlApp(manager: ServiceManager) {
                 stats           = serviceStats,
                 pendingStates   = pendingStates,
                 manager         = manager,
+                settings        = draftSettings,
                 onRefresh       = ::refreshAll,
                 onPushWidget    = ::pushWidget
             )
@@ -334,6 +335,13 @@ fun SettingsPane(
                 subtitle = "Show SERVICE / CTRL labels",
                 value    = settings.showColumnHeaders
             ) { onUpdate(settings.copy(showColumnHeaders = it), true) }
+        }
+        item {
+            SettingToggle(
+                label    = "Network Usage",
+                subtitle = "Show inbound/outbound KB in summary",
+                value    = settings.showNetworkUsage
+            ) { onUpdate(settings.copy(showNetworkUsage = it), true) }
         }
 
         // ── Font ────────────────────────────────────────────
@@ -531,6 +539,7 @@ fun ServiceListPane(
     stats: Map<String, ServiceStats>,
     pendingStates: Map<String, String>,
     manager: ServiceManager,
+    settings: WidgetSettings,
     onRefresh: () -> Unit,
     onPushWidget: () -> Unit
 ) {
@@ -547,7 +556,8 @@ fun ServiceListPane(
                 serviceCount = panels.size,
                 runningCount = runtimes.values.count {
                     it.status == RunStatus.RUNNING || it.status == RunStatus.DEGRADED
-                }
+                },
+                networkUsage = if (settings.showNetworkUsage) manager.getAppNetworkUsage() else null
             )
         }
         if (panels.isNotEmpty()) {
@@ -796,8 +806,5 @@ fun ActionRow(action: ServiceItem, manager: ServiceManager, onRefresh: () -> Uni
              fontSize = 14.sp, modifier = Modifier.weight(1f))
         Text("RUN", color = Color(0xFF0088CC),
              fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
-    }
-}
-Weight = FontWeight.Bold, letterSpacing = 0.8.sp)
     }
 }
