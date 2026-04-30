@@ -580,7 +580,7 @@ fun ServiceListPane(
         if (actions.isNotEmpty()) {
             item { Spacer(Modifier.height(16.dp)); SectionLabel("ACTIONS") }
             items(actions) { action ->
-                ActionRow(action, manager, onRefresh)
+                ActionRow(action, manager, onRefresh, onPushWidget)
             }
         }
     }
@@ -783,7 +783,12 @@ private fun formatOneDecimal(value: Float): String {
 }
 
 @Composable
-fun ActionRow(action: ServiceItem, manager: ServiceManager, onRefresh: () -> Unit) {
+fun ActionRow(
+    action: ServiceItem,
+    manager: ServiceManager,
+    onRefresh: () -> Unit,
+    onPushWidget: () -> Unit
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
