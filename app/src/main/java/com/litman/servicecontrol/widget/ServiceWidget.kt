@@ -30,14 +30,14 @@ object ServiceWidget {
     const val ACTION_TOGGLE = "com.litman.servicecontrol.widget.TOGGLE"
     const val EXTRA_SERVICE_ID = "service_id"
 
-    suspend fun updateAll(context: Context) {
+    fun updateAll(context: Context) {
         val appContext = context.applicationContext
         val manager = AppWidgetManager.getInstance(appContext)
         val ids = WidgetUpdater.appWidgetIds(appContext)
         update(appContext, manager, ids)
     }
 
-    suspend fun update(context: Context, manager: AppWidgetManager, appWidgetIds: IntArray) {
+    fun update(context: Context, manager: AppWidgetManager, appWidgetIds: IntArray) {
         if (appWidgetIds.isEmpty()) return
 
         val appContext = context.applicationContext
@@ -73,24 +73,7 @@ object ServiceWidget {
         val commandStarted = manager.togglePower(serviceId, isRunning)
         updateAll(appContext)
         if (!commandStarted) return
-
-        repeat(10) {
-            kotlinx.coroutines.delay(1000)
-            val runtime = manager.checkAndCacheStatus(service)
-            val reached = if (isRunning) {
-                runtime.status == RunStatus.STOPPED
-            } else {
-                runtime.status == RunStatus.RUNNING || runtime.status == RunStatus.DEGRADED
-            }
-            updateAll(appContext)
-            if (reached) {
-                manager.clearPending(serviceId)
-                updateAll(appContext)
-                return
-            }
-        }
-
-        manager.clearPending(serviceId)
+        manager.waitForToggleCompletion(serviceId, isRunning)
         updateAll(appContext)
     }
 

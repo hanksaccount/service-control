@@ -15,7 +15,7 @@ object WidgetUpdater {
         return manager.getAppWidgetIds(component)
     }
 
-    suspend fun refresh(context: Context) {
+    fun refresh(context: Context) {
         val appContext = context.applicationContext
         val ids = appWidgetIds(appContext)
         Log.d(TAG, "[ServiceCtrl] WidgetUpdater: refreshing classic widgets count=${ids.size}")

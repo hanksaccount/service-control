@@ -18,6 +18,24 @@
       "show_in_widget": true,
       "has_panel": true,
       "panel_url": "http://127.0.0.1:5000"
+    },
+    {
+      "id": "elpris",
+      "label": "Elpris",
+      "path": "/data/data/com.termux/files/home/projects/service-control/services/elpris",
+      "autostart": true,
+      "show_in_widget": true,
+      "has_panel": true,
+      "panel_url": "http://127.0.0.1:5100"
+    },
+    {
+      "id": "autosort",
+      "label": "AutoSort",
+      "path": "/data/data/com.termux/files/home/projects/service-control/services/autosort",
+      "autostart": true,
+      "show_in_widget": true,
+      "has_panel": true,
+      "panel_url": "http://127.0.0.1:5300"
     }
   ]
 }

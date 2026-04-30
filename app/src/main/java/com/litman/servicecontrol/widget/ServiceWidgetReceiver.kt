@@ -10,13 +10,10 @@ import kotlinx.coroutines.launch
 
 class ServiceWidgetReceiver : AppWidgetProvider() {
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
-        val pending = goAsync()
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                ServiceWidget.update(context, appWidgetManager, appWidgetIds)
-            } finally {
-                pending.finish()
-            }
+        try {
+            ServiceWidget.update(context, appWidgetManager, appWidgetIds)
+        } catch (t: Throwable) {
+            android.util.Log.e("ServiceCtrl", "widget onUpdate failed", t)
         }
     }
 

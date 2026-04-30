@@ -100,7 +100,8 @@ object TemplateRegistry {
             killPatterns = listOf("elpris_service.sh", "server.py"),
             notificationIds = listOf("elpris"),
             checkMode = StatusCheckMode.PORT,
-            showInWidget = true, canOpen = true, openUrl = "http://127.0.0.1:5100"
+            showInWidget = true, canOpen = true, openUrl = "http://127.0.0.1:5100",
+            contractPath = "$HOME/projects/service-control/services/elpris"
         ),
         ServiceTemplate(
             name = "dashboard", displayName = "dashboard",
@@ -123,7 +124,8 @@ object TemplateRegistry {
             killPatterns = listOf("auto_sort_service.sh", "panel-start.sh"),
             notificationIds = listOf("autosort", "autosort-status"),
             checkMode = StatusCheckMode.PORT,
-            showInWidget = true, canOpen = true, openUrl = "http://127.0.0.1:5300"
+            showInWidget = true, canOpen = true, openUrl = "http://127.0.0.1:5300",
+            contractPath = "$HOME/projects/service-control/services/autosort"
         ),
         ServiceTemplate(
             name = "runfull", displayName = "Kör alla",
@@ -184,7 +186,7 @@ class ServiceManager(val context: Context) {
     private val termuxBash = "/data/data/com.termux/files/usr/bin/bash"
 
     // Bump this when buildDefaultServices() changes port/path/mode config.
-    private val SERVICES_VERSION = 7  // v7: force refresh of contract-based start/stop config
+    private val SERVICES_VERSION = 8  // v8: force refresh of elpris/autosort contract-based start/stop config
 
     // ── Settings ─────────────────────────────────────────────────────────────
 
@@ -616,6 +618,33 @@ class ServiceManager(val context: Context) {
             }
             return commandStarted
         }
+    }
+
+    suspend fun waitForToggleCompletion(serviceId: String, isRunning: Boolean): Boolean {
+        val service = getSavedServices().find { it.id == serviceId } ?: return false
+        repeat(10) {
+            kotlinx.coroutines.delay(1000)
+            val runtime = checkAndCacheStatus(service)
+            val reached = if (isRunning) {
+                runtime.status == RunStatus.STOPPED
+            } else {
+                runtime.status == RunStatus.RUNNING || runtime.status == RunStatus.DEGRADED
+            }
+            if (reached) {
+                clearPending(serviceId)
+                return true
+            }
+        }
+
+        Log.w(TAG, "[ServiceCtrl] waitForToggleCompletion: timeout waiting for $serviceId")
+        clearPending(serviceId)
+        return false
+    }
+
+    suspend fun togglePowerAndWait(serviceId: String, isRunning: Boolean): Boolean {
+        val commandStarted = togglePower(serviceId, isRunning)
+        if (!commandStarted) return false
+        return waitForToggleCompletion(serviceId, isRunning)
     }
 
     fun startAllEligible() {

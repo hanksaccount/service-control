@@ -719,10 +719,11 @@ fun ServiceRow(
                             onPushWidget()
                             if (!commandStarted) return@launch
 
-                            // Verify after Termux has had time to spawn or stop the service.
-                            delay(1500)
-                            onRefresh()
-                            onPushWidget()
+                            scope.launch {
+                                manager.waitForToggleCompletion(service.id, isRunning)
+                                onRefresh()
+                                onPushWidget()
+                            }
                         }
                     } else Modifier
                 )
