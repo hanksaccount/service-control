@@ -21,24 +21,24 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.glance.appwidget.updateAll
 import com.litman.servicecontrol.model.*
-import com.litman.servicecontrol.widget.ServiceWidget
+import com.litman.servicecontrol.widget.WidgetUpdater
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private const val TAG = "ServiceCtrl"
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
-private val BG      = Color(0xFF0D0D11)
-private val SURF    = Color(0xFF131318)
-private val LINE    = Color(0xFF1C1C28)
-private val DIM     = Color(0xFF2E2E3C)
-private val MUTED   = Color(0xFF565666)
-private val SUB     = Color(0xFF8888A0)
-private val TEXT    = Color(0xFFEEEEF4)
-private val GREEN   = Color(0xFF00D966)
-private val RED     = Color(0xFFCC3333)
+private val BG      = Color(0xFF080A0D)
+private val SURF    = Color(0xFF10161C)
+private val SURF2   = Color(0xFF151D24)
+private val LINE    = Color(0xFF22313A)
+private val DIM     = Color(0xFF33424C)
+private val MUTED   = Color(0xFF6B7884)
+private val SUB     = Color(0xFFA8B3BD)
+private val TEXT    = Color(0xFFF4F7FA)
+private val GREEN   = Color(0xFF49E68A)
+private val RED     = Color(0xFFFF5F6D)
 
 // ── Activity ──────────────────────────────────────────────────────────────────
 
@@ -109,20 +109,28 @@ fun ServiceControlApp(manager: ServiceManager) {
     fun pushWidget() {
         scope.launch {
             Log.d(TAG, "[ServiceCtrl] pushWidget: pushing to all widget instances")
-            ServiceWidget().updateAll(manager.context)
+            WidgetUpdater.refresh(manager.context)
         }
     }
 
     fun commitSettings(new: WidgetSettings) {
         draftSettings = new
         manager.saveWidgetSettings(new)
-        Log.d(TAG, "[ServiceCtrl] commitSettings: saved and pushing widget update")
+        Log.d(TAG, "[ServiceCtrl] commitSettings: saved and forcing widget refresh")
         pushWidget()
     }
 
     fun updateSettings(new: WidgetSettings, persist: Boolean = false) {
         draftSettings = new
         if (persist) commitSettings(new)
+    }
+
+    LaunchedEffect(showSettings, draftSettings) {
+        if (showSettings) {
+            delay(150)
+            manager.saveWidgetSettings(draftSettings)
+            WidgetUpdater.refresh(manager.context)
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -133,7 +141,7 @@ fun ServiceControlApp(manager: ServiceManager) {
         modifier = Modifier
             .fillMaxSize()
             .background(BG)
-            .padding(horizontal = 18.dp, vertical = 22.dp)
+            .padding(horizontal = 16.dp, vertical = 18.dp)
     ) {
         // ── Top bar ───────────────────────────────────────────
         Row(
@@ -169,8 +177,7 @@ fun ServiceControlApp(manager: ServiceManager) {
         }
 
         Spacer(Modifier.height(18.dp))
-        HRule()
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(8.dp))
 
         if (showSettings) {
             SettingsPane(
@@ -508,7 +515,10 @@ fun ServiceListPane(
     val panels  = services.filter { it.checkMode != StatusCheckMode.ACTION }
     val actions = services.filter { it.checkMode == StatusCheckMode.ACTION }
 
-    LazyColumn(modifier = Modifier.fillMaxSize()) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
         if (panels.isNotEmpty()) {
             item { SectionLabel("PROCESSES") }
             items(panels) { service ->
@@ -583,16 +593,22 @@ fun ServiceRow(
     }
 
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(SURF)
+            .border(1.dp, LINE, RoundedCornerShape(12.dp))
+            .padding(horizontal = 12.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         // Status dot
         Box(
             modifier = Modifier
-                .size(6.dp)
+                .width(4.dp)
+                .height(36.dp)
                 .background(
                     statusColor,
-                    RoundedCornerShape(3.dp)
+                    RoundedCornerShape(4.dp)
                 )
         )
         Spacer(Modifier.width(12.dp))
@@ -613,8 +629,8 @@ fun ServiceRow(
         // Power button — disabled while pending
         Box(
             modifier = Modifier
-                .background(btnBg, RoundedCornerShape(7.dp))
-                .border(1.dp, btnFg.copy(alpha = 0.25f), RoundedCornerShape(7.dp))
+                .background(btnBg, RoundedCornerShape(9.dp))
+                .border(1.dp, btnFg.copy(alpha = 0.30f), RoundedCornerShape(9.dp))
                 .then(
                     if (canToggle) Modifier.clickable {
                         scope.launch {
@@ -628,7 +644,7 @@ fun ServiceRow(
                         }
                     } else Modifier
                 )
-                .padding(horizontal = 14.dp, vertical = 7.dp)
+                .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
             Text(
                 text = btnLabel, color = btnFg,
@@ -638,7 +654,6 @@ fun ServiceRow(
             )
         }
     }
-    HRule()
 }
 
 @Composable
@@ -646,6 +661,9 @@ fun ActionRow(action: ServiceItem, manager: ServiceManager, onRefresh: () -> Uni
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(SURF2)
+            .border(1.dp, LINE, RoundedCornerShape(12.dp))
             .clickable {
                 Log.d(TAG, "ActionRow: running ${action.label}")
                 if (action.id == "runfull") {
@@ -657,7 +675,7 @@ fun ActionRow(action: ServiceItem, manager: ServiceManager, onRefresh: () -> Uni
                 }
                 onRefresh()
             }
-            .padding(vertical = 10.dp),
+            .padding(horizontal = 12.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text("⚡", fontSize = 14.sp, modifier = Modifier.padding(end = 12.dp))
@@ -666,5 +684,4 @@ fun ActionRow(action: ServiceItem, manager: ServiceManager, onRefresh: () -> Uni
         Text("RUN", color = Color(0xFF0088CC),
              fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
     }
-    HRule()
 }

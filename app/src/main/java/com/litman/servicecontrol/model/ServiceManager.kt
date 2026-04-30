@@ -172,6 +172,8 @@ class ServiceManager(val context: Context) {
     private val prefs: SharedPreferences =
         context.getSharedPreferences("services_config", Context.MODE_PRIVATE)
     private val gson = Gson()
+    private val termuxHome = "/data/data/com.termux/files/home"
+    private val termuxBash = "/data/data/com.termux/files/usr/bin/bash"
 
     // Bump this when buildDefaultServices() changes port/path/mode config.
     private val SERVICES_VERSION = 5  // v5: dashboard migrerad till contractPath
@@ -381,27 +383,28 @@ class ServiceManager(val context: Context) {
 
     // ── Actions ───────────────────────────────────────────────────────────────
 
-    fun runTermuxScript(scriptPath: String) {
+    fun runTermuxScript(scriptPath: String): Boolean {
         Log.d(TAG, "runTermuxScript: $scriptPath")
-        sendTermuxCommand(arrayOf(scriptPath))
+        return sendTermuxShell("bash ${shellQuote(scriptPath)}")
     }
 
-    fun stopService(item: ServiceItem) {
+    fun stopService(item: ServiceItem): Boolean {
         // Pilot: om tjänsten har ett kontraktsstopp, delegera dit
         val contractPath = item.contractPath
         if (contractPath != null) {
             Log.d(TAG, "[ServiceCtrl] STOP via contract: id=${item.id} script=$contractPath/stop.sh")
-            sendTermuxCommand(arrayOf("$contractPath/stop.sh"))
-            return
+            return sendTermuxShell("bash ${shellQuote("$contractPath/stop.sh")}")
         }
 
         // Legacy: bygg kommandot från template-data
-        val flag = item.stopFlagPath ?: "/data/data/com.termux/files/home/STOP_${item.name.replace('-', '_').uppercase()}"
+        val flag = item.stopFlagPath ?: "$termuxHome/STOP_${item.name.replace('-', '_').uppercase()}"
         val cmds = mutableListOf<String>()
-        cmds.add("touch $flag")
+        cmds.add("touch ${shellQuote(flag)}")
         item.ports.forEach { port -> cmds.add("fuser -k $port/tcp 2>/dev/null || true") }
-        item.killPatterns.forEach { pattern -> cmds.add("pkill -f \"$pattern\" 2>/dev/null || true") }
-        item.notificationIds.forEach { nid -> cmds.add("termux-notification --remove \"$nid\" 2>/dev/null || true") }
+        item.killPatterns.forEach { pattern -> cmds.add("pkill -f ${shellQuote(pattern)} 2>/dev/null || true") }
+        item.notificationIds.forEach { nid ->
+            cmds.add("termux-notification-remove ${shellQuote(nid)} 2>/dev/null || termux-notification --remove ${shellQuote(nid)} 2>/dev/null || true")
+        }
 
         val fullCmd = cmds.joinToString("; ")
         Log.d(TAG, "[ServiceCtrl] STOP ACTION (legacy): id=${item.id} name=${item.name}")
@@ -409,26 +412,25 @@ class ServiceManager(val context: Context) {
         Log.d(TAG, "[ServiceCtrl]   Patterns: ${item.killPatterns}")
         Log.d(TAG, "[ServiceCtrl]   Notifs: ${item.notificationIds}")
         Log.d(TAG, "[ServiceCtrl]   Bash: $fullCmd")
-        sendTermuxCommand(arrayOf("-c", fullCmd))
+        return sendTermuxShell(fullCmd)
     }
 
-    fun startService(item: ServiceItem) {
+    fun startService(item: ServiceItem): Boolean {
         // Pilot: om tjänsten har ett kontraktsstart, delegera dit
         val contractPath = item.contractPath
         if (contractPath != null) {
             Log.d(TAG, "[ServiceCtrl] START via contract: id=${item.id} script=$contractPath/start.sh")
-            sendTermuxCommand(arrayOf("$contractPath/start.sh"))
-            return
+            return sendTermuxShell("bash ${shellQuote("$contractPath/start.sh")}")
         }
 
         // Legacy: ta bort STOP-flagga och kör shortcut-skript
-        val flag = item.stopFlagPath ?: "/data/data/com.termux/files/home/STOP_${item.name.replace('-', '_').uppercase()}"
-        val fullCmd = "rm -f $flag; ${item.scriptPath}"
+        val flag = item.stopFlagPath ?: "$termuxHome/STOP_${item.name.replace('-', '_').uppercase()}"
+        val fullCmd = "rm -f ${shellQuote(flag)}; bash ${shellQuote(item.scriptPath)}"
         Log.d(TAG, "[ServiceCtrl] START ACTION (legacy): id=${item.id} name=${item.name}")
         Log.d(TAG, "[ServiceCtrl]   Flag: $flag")
         Log.d(TAG, "[ServiceCtrl]   Script: ${item.scriptPath}")
         Log.d(TAG, "[ServiceCtrl]   Bash: $fullCmd")
-        sendTermuxCommand(arrayOf("-c", fullCmd))
+        return sendTermuxShell(fullCmd)
     }
 
     fun toggleMute(serviceId: String) {
@@ -440,12 +442,12 @@ class ServiceManager(val context: Context) {
         }
     }
 
-    fun togglePower(serviceId: String, isRunning: Boolean) {
+    fun togglePower(serviceId: String, isRunning: Boolean): Boolean {
         val services = getSavedServices().toMutableList()
         val idx = services.indexOfFirst { it.id == serviceId }
         if (idx == -1) {
             Log.w(TAG, "[ServiceCtrl] togglePower: service NOT FOUND: $serviceId")
-            return
+            return false
         }
         val item = services[idx]
         Log.d(TAG, "[ServiceCtrl] togglePower: id=$serviceId isRunningIn=$isRunning isManuallyStoppedBefore=${item.isManuallyStopped}")
@@ -453,23 +455,35 @@ class ServiceManager(val context: Context) {
         if (isRunning) {
             if (!item.canStop) {
                 Log.w(TAG, "[ServiceCtrl] togglePower: stop blocked by service config: $serviceId")
-                return
+                return false
             }
             markStopping(serviceId)
             services[idx] = item.copy(isManuallyStopped = true)
             saveServices(services)
             Log.d(TAG, "[ServiceCtrl]   Decided: STOP")
-            stopService(item)
+            val commandStarted = stopService(item)
+            if (!commandStarted) {
+                clearPending(serviceId)
+                services[idx] = item
+                saveServices(services)
+            }
+            return commandStarted
         } else {
             if (!item.canStart) {
                 Log.w(TAG, "[ServiceCtrl] togglePower: start blocked by service config: $serviceId")
-                return
+                return false
             }
             markStarting(serviceId)
             services[idx] = item.copy(isManuallyStopped = false)
             saveServices(services)
             Log.d(TAG, "[ServiceCtrl]   Decided: START")
-            startService(item)
+            val commandStarted = startService(item)
+            if (!commandStarted) {
+                clearPending(serviceId)
+                services[idx] = item
+                saveServices(services)
+            }
+            return commandStarted
         }
     }
 
@@ -490,7 +504,7 @@ class ServiceManager(val context: Context) {
             Log.d(TAG, "startAllEligible: starting ${item.label}")
             startService(item)
         }
-        sendTermuxCommand(arrayOf("-c", "termux-toast \"Native app-start slutförd\""))
+        sendTermuxShell("termux-toast ${shellQuote("Native app-start slutförd")} 2>/dev/null || true")
     }
 
     fun stopAll() {
@@ -511,23 +525,31 @@ class ServiceManager(val context: Context) {
             stopService(item)
         }
         if (changed) saveServices(services)
-        sendTermuxCommand(arrayOf("-c", "termux-toast \"Alla tjänster stoppade\""))
+        sendTermuxShell("termux-toast ${shellQuote("Alla tjänster stoppade")} 2>/dev/null || true")
     }
 
-    private fun sendTermuxCommand(args: Array<String>) {
+    private fun sendTermuxShell(command: String): Boolean {
         val intent = Intent("com.termux.RUN_COMMAND").apply {
+            setPackage("com.termux")
             setClassName("com.termux", "com.termux.app.RunCommandService")
-            putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash")
-            putExtra("com.termux.RUN_COMMAND_ARGUMENTS", args)
+            addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES)
+            putExtra("com.termux.RUN_COMMAND_PATH", termuxBash)
+            putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf("-lc", command))
+            putExtra("com.termux.RUN_COMMAND_WORKDIR", termuxHome)
             putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
         }
-        Log.d(TAG, "sendTermuxCommand: bash ${args.joinToString(" ")}")
-        try {
-            context.startService(intent)
+        Log.d(TAG, "sendTermuxShell: bash -lc $command")
+        return try {
+            context.applicationContext.startService(intent)
+            true
         } catch (e: Exception) {
-            Log.e(TAG, "sendTermuxCommand: startService failed", e)
+            Log.e(TAG, "sendTermuxShell: startService failed. Check Termux RUN_COMMAND permission and allow-external-apps.", e)
+            false
         }
     }
+
+    private fun shellQuote(value: String): String =
+        "'" + value.replace("'", "'\"'\"'") + "'"
 
     // ── Parallel status check ─────────────────────────────────────────────────
 

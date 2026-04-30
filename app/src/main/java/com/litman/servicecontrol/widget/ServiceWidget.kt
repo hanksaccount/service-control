@@ -19,7 +19,6 @@ import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.appwidget.cornerRadius
 import androidx.glance.appwidget.provideContent
-import androidx.glance.appwidget.updateAll
 import androidx.glance.background
 import androidx.glance.layout.*
 import androidx.glance.text.FontFamily
@@ -422,7 +421,7 @@ class RefreshActionWidget : ActionCallback {
             (it.type == ServiceType.WEB_PANEL || it.type == ServiceType.HYBRID)
         }
         manager.checkAllStatuses(services)
-        ServiceWidget().update(context, glanceId)
+        WidgetUpdater.refresh(context)
     }
 }
 
@@ -441,9 +440,10 @@ class TogglePowerAction : ActionCallback {
                                  currentStatus.status == RunStatus.DEGRADED
         
         // 2. Command execution — togglePower marks pending (STARTING/STOPPING) internally
-        manager.togglePower(serviceId, isCurrentlyRunning)
+        val commandStarted = manager.togglePower(serviceId, isCurrentlyRunning)
         // Immediate visual feedback: widget reflects pending state set by togglePower
-        ServiceWidget().updateAll(context)
+        WidgetUpdater.refresh(context)
+        if (!commandStarted) return
 
         // 4. Robust Verification Loop (10 attempts = 10s)
         var reachedTarget = false
@@ -470,6 +470,6 @@ class TogglePowerAction : ActionCallback {
         if (!reachedTarget) {
             Log.w(TAG, "[ServiceCtrl] Widget Action: Timeout (10s) reached for $serviceId. Target state not confirmed.")
         }
-        ServiceWidget().updateAll(context)
+        WidgetUpdater.refresh(context)
     }
 }

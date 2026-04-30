@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "services": [
+    {
+      "id": "dashboard",
+      "label": "Dashboard",
+      "path": "/data/data/com.termux/files/home/projects/service-control/services/dashboard",
+      "autostart": true,
+      "show_in_widget": true,
+      "has_panel": true,
+      "panel_url": "http://127.0.0.1:5000"
+    }
+  ]
+}
