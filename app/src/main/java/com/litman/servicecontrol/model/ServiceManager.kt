@@ -338,9 +338,31 @@ class ServiceManager(val context: Context) {
     /** Performs checkStatus and persists the result to the global cache. */
     suspend fun checkAndCacheStatus(item: ServiceItem): ServiceRuntime {
         val runtime = checkStatus(item)
+        
+        // Sync isManuallyStopped from filesystem if flag exists
+        val flag = item.stopFlagPath ?: "$termuxHome/STOP_${item.name.replace('-', '_').uppercase()}"
+        val flagExists = withContext(Dispatchers.IO) { File(flag).exists() }
+        if (flagExists && !item.isManuallyStopped) {
+            Log.d(TAG, "[ServiceCtrl] checkAndCacheStatus: flag found for ${item.id}, syncing isManuallyStopped=true")
+            updateManualStopState(item.id, true)
+        } else if (!flagExists && item.isManuallyStopped && runtime.status == RunStatus.RUNNING) {
+             // If flag is gone but app thinks it's stopped, and it's actually running, sync back
+             Log.d(TAG, "[ServiceCtrl] checkAndCacheStatus: flag GONE and service RUNNING for ${item.id}, syncing isManuallyStopped=false")
+             updateManualStopState(item.id, false)
+        }
+
         updateSingleCachedStatus(item.id, runtime)
         syncUptime(item.id, runtime)
         return runtime
+    }
+
+    private fun updateManualStopState(serviceId: String, isStopped: Boolean) {
+        val services = getSavedServices().toMutableList()
+        val idx = services.indexOfFirst { it.id == serviceId }
+        if (idx != -1) {
+            services[idx] = services[idx].copy(isManuallyStopped = isStopped)
+            saveServices(services)
+        }
     }
 
     private fun updateSingleCachedStatus(id: String, runtime: ServiceRuntime) {
