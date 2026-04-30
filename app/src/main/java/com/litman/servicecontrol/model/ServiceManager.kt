@@ -38,7 +38,8 @@ data class ServiceItem(
     var canStart: Boolean = true,
     var canStop: Boolean = true,
     var isMuted: Boolean = false,
-    var isManuallyStopped: Boolean = false
+    var isManuallyStopped: Boolean = false,
+    var contractPath: String? = null  // pilot: sökväg till services/<id>/ med start/stop/status.sh
 ) {
     val label: String get() = if (displayName.isNotBlank()) displayName else name
     // For backward compatibility and status checks, we still use the first port as primary
@@ -61,7 +62,8 @@ data class ServiceTemplate(
     val canOpen: Boolean = false,
     val openUrl: String? = null,
     val canStart: Boolean = true,
-    val canStop: Boolean = true
+    val canStop: Boolean = true,
+    val contractPath: String? = null  // pilot: sökväg till services/<id>/ med start/stop/status.sh
 )
 
 // ── Template registry ────────────────────────────────────────────────────────
@@ -101,7 +103,8 @@ object TemplateRegistry {
             killPatterns = listOf("start.sh", "battery_monitor.sh"),
             notificationIds = listOf("dashboard_pro"),
             checkMode = StatusCheckMode.PORT,
-            showInWidget = true, canOpen = true, openUrl = "http://127.0.0.1:5000"
+            showInWidget = true, canOpen = true, openUrl = "http://127.0.0.1:5000",
+            contractPath = "$HOME/projects/service-control/services/dashboard"
         ),
         ServiceTemplate(
             name = "autosort", displayName = "autosort",
@@ -130,6 +133,8 @@ data class WidgetSettings(
     val nameSize: Float     = 13f,
     val metaSize: Float     = 9f,
     val padding: Float      = 12f,
+    val rowSpacing: Float   = 8f,
+    val actionScale: Float  = 1f,
     val opacity: Int        = 230,
     val cornerRadius: Float = 12f,
     val fontStyle: String   = "SANS",    // SANS | MONO
@@ -169,7 +174,7 @@ class ServiceManager(val context: Context) {
     private val gson = Gson()
 
     // Bump this when buildDefaultServices() changes port/path/mode config.
-    private val SERVICES_VERSION = 4
+    private val SERVICES_VERSION = 5  // v5: dashboard migrerad till contractPath
 
     // ── Settings ─────────────────────────────────────────────────────────────
 
@@ -185,6 +190,8 @@ class ServiceManager(val context: Context) {
                 nameSize          = if (obj.has("nameSize"))          obj["nameSize"].asFloat          else d.nameSize,
                 metaSize          = if (obj.has("metaSize"))          obj["metaSize"].asFloat          else d.metaSize,
                 padding           = if (obj.has("padding"))           obj["padding"].asFloat           else d.padding,
+                rowSpacing        = if (obj.has("rowSpacing"))        obj["rowSpacing"].asFloat        else d.rowSpacing,
+                actionScale       = if (obj.has("actionScale"))       obj["actionScale"].asFloat       else d.actionScale,
                 opacity           = if (obj.has("opacity"))           obj["opacity"].asInt             else d.opacity,
                 cornerRadius      = if (obj.has("cornerRadius"))      obj["cornerRadius"].asFloat      else d.cornerRadius,
                 fontStyle         = if (obj.has("fontStyle"))         obj["fontStyle"].asString        else d.fontStyle,
@@ -300,7 +307,8 @@ class ServiceManager(val context: Context) {
                 canOpen = template.canOpen,
                 openUrl = template.openUrl,
                 canStart = template.canStart,
-                canStop = template.canStop
+                canStop = template.canStop,
+                contractPath = template.contractPath
             )
         }
     }
@@ -317,6 +325,7 @@ class ServiceManager(val context: Context) {
     suspend fun checkAndCacheStatus(item: ServiceItem): ServiceRuntime {
         val runtime = checkStatus(item)
         updateSingleCachedStatus(item.id, runtime)
+        syncUptime(item.id, runtime)
         return runtime
     }
 
@@ -378,6 +387,15 @@ class ServiceManager(val context: Context) {
     }
 
     fun stopService(item: ServiceItem) {
+        // Pilot: om tjänsten har ett kontraktsstopp, delegera dit
+        val contractPath = item.contractPath
+        if (contractPath != null) {
+            Log.d(TAG, "[ServiceCtrl] STOP via contract: id=${item.id} script=$contractPath/stop.sh")
+            sendTermuxCommand(arrayOf("$contractPath/stop.sh"))
+            return
+        }
+
+        // Legacy: bygg kommandot från template-data
         val flag = item.stopFlagPath ?: "/data/data/com.termux/files/home/STOP_${item.name.replace('-', '_').uppercase()}"
         val cmds = mutableListOf<String>()
         cmds.add("touch $flag")
@@ -386,7 +404,7 @@ class ServiceManager(val context: Context) {
         item.notificationIds.forEach { nid -> cmds.add("termux-notification --remove \"$nid\" 2>/dev/null || true") }
 
         val fullCmd = cmds.joinToString("; ")
-        Log.d(TAG, "[ServiceCtrl] STOP ACTION: id=${item.id} name=${item.name}")
+        Log.d(TAG, "[ServiceCtrl] STOP ACTION (legacy): id=${item.id} name=${item.name}")
         Log.d(TAG, "[ServiceCtrl]   Ports: ${item.ports}")
         Log.d(TAG, "[ServiceCtrl]   Patterns: ${item.killPatterns}")
         Log.d(TAG, "[ServiceCtrl]   Notifs: ${item.notificationIds}")
@@ -395,9 +413,18 @@ class ServiceManager(val context: Context) {
     }
 
     fun startService(item: ServiceItem) {
+        // Pilot: om tjänsten har ett kontraktsstart, delegera dit
+        val contractPath = item.contractPath
+        if (contractPath != null) {
+            Log.d(TAG, "[ServiceCtrl] START via contract: id=${item.id} script=$contractPath/start.sh")
+            sendTermuxCommand(arrayOf("$contractPath/start.sh"))
+            return
+        }
+
+        // Legacy: ta bort STOP-flagga och kör shortcut-skript
         val flag = item.stopFlagPath ?: "/data/data/com.termux/files/home/STOP_${item.name.replace('-', '_').uppercase()}"
         val fullCmd = "rm -f $flag; ${item.scriptPath}"
-        Log.d(TAG, "[ServiceCtrl] START ACTION: id=${item.id} name=${item.name}")
+        Log.d(TAG, "[ServiceCtrl] START ACTION (legacy): id=${item.id} name=${item.name}")
         Log.d(TAG, "[ServiceCtrl]   Flag: $flag")
         Log.d(TAG, "[ServiceCtrl]   Script: ${item.scriptPath}")
         Log.d(TAG, "[ServiceCtrl]   Bash: $fullCmd")
@@ -424,12 +451,20 @@ class ServiceManager(val context: Context) {
         Log.d(TAG, "[ServiceCtrl] togglePower: id=$serviceId isRunningIn=$isRunning isManuallyStoppedBefore=${item.isManuallyStopped}")
         
         if (isRunning) {
+            if (!item.canStop) {
+                Log.w(TAG, "[ServiceCtrl] togglePower: stop blocked by service config: $serviceId")
+                return
+            }
             markStopping(serviceId)
             services[idx] = item.copy(isManuallyStopped = true)
             saveServices(services)
             Log.d(TAG, "[ServiceCtrl]   Decided: STOP")
             stopService(item)
         } else {
+            if (!item.canStart) {
+                Log.w(TAG, "[ServiceCtrl] togglePower: start blocked by service config: $serviceId")
+                return
+            }
             markStarting(serviceId)
             services[idx] = item.copy(isManuallyStopped = false)
             saveServices(services)
@@ -448,9 +483,12 @@ class ServiceManager(val context: Context) {
                 Log.d(TAG, "startAllEligible: skipping ${item.label} (manually stopped)")
                 continue
             }
+            if (!item.canStart) {
+                Log.d(TAG, "startAllEligible: skipping ${item.label} (start disabled)")
+                continue
+            }
             Log.d(TAG, "startAllEligible: starting ${item.label}")
-            val flagName = item.name.replace('-', '_').uppercase()
-            sendTermuxCommand(arrayOf("-c", "rm -f /data/data/com.termux/files/home/STOP_$flagName; ${item.scriptPath}"))
+            startService(item)
         }
         sendTermuxCommand(arrayOf("-c", "termux-toast \"Native app-start slutförd\""))
     }
@@ -463,6 +501,10 @@ class ServiceManager(val context: Context) {
         for (i in services.indices) {
             val item = services[i]
             if (item.type == ServiceType.ACTION_SCRIPT) continue
+            if (!item.canStop) {
+                Log.d(TAG, "stopAll: skipping ${item.label} (stop disabled)")
+                continue
+            }
             
             services[i] = item.copy(isManuallyStopped = true)
             changed = true
@@ -496,6 +538,7 @@ class ServiceManager(val context: Context) {
                 async { service.id to checkStatus(service) }
             }.awaitAll().toMap()
             saveCachedStatuses(results)
+            results.forEach { (id, runtime) -> syncUptime(id, runtime) }
             results
         }
 
@@ -513,6 +556,16 @@ class ServiceManager(val context: Context) {
         prefs.edit().putString("cached_statuses", gson.toJson(statuses)).apply()
     }
 
+    private fun syncUptime(serviceId: String, runtime: ServiceRuntime) {
+        when (runtime.status) {
+            RunStatus.RUNNING, RunStatus.DEGRADED -> {
+                if (prefs.getLong("up_since_$serviceId", 0L) == 0L) recordStartTime(serviceId)
+            }
+            RunStatus.STOPPED -> clearStartTime(serviceId)
+            else -> Unit
+        }
+    }
+
     // ── Uptime tracking ───────────────────────────────────────────────────────
     // Called when we confirm a service transitioned STOPPED → RUNNING.
 
@@ -522,6 +575,7 @@ class ServiceManager(val context: Context) {
     }
 
     fun clearStartTime(serviceId: String) {
+        if (prefs.getLong("up_since_$serviceId", 0L) == 0L) return
         prefs.edit().remove("up_since_$serviceId").apply()
         Log.d(TAG, "clearStartTime: $serviceId")
     }
@@ -557,7 +611,8 @@ class ServiceManager(val context: Context) {
                     type = template.type, group = template.group,
                     checkMode = template.checkMode, processMatch = template.processMatch,
                     canOpen = template.canOpen, openUrl = template.openUrl,
-                    canStart = template.canStart, canStop = template.canStop
+                    canStart = template.canStart, canStop = template.canStop,
+                    contractPath = template.contractPath
                 ) else ServiceItem(id = path.hashCode().toString(), name = name, scriptPath = path))
             } else if (template != null) {
                 val e = current[existing]
@@ -570,7 +625,8 @@ class ServiceManager(val context: Context) {
                     isEnabledOnWidget = template.showInWidget, type = template.type,
                     group = template.group, checkMode = template.checkMode,
                     processMatch = template.processMatch, canOpen = template.canOpen,
-                    openUrl = template.openUrl, canStart = template.canStart, canStop = template.canStop
+                    openUrl = template.openUrl, canStart = template.canStart, canStop = template.canStop,
+                    contractPath = template.contractPath
                 )
             }
         }

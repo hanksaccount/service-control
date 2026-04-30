@@ -117,6 +117,7 @@ private fun WidgetBoard(
     val font   = widgetFont(settings.fontStyle)
     val total  = services.size
     val pad    = settings.padding.dp
+    val rowGap = settings.rowSpacing.dp
 
     Column(
         modifier = GlanceModifier
@@ -230,7 +231,7 @@ private fun WidgetBoard(
                 val isPending = pending[service.id] ?: false
                 val uptime    = uptimes[service.id]
                 WidgetServiceRow(service, runtime, isPending, uptime, settings, font, accent, theme)
-                if (index < services.lastIndex) Spacer(GlanceModifier.height(8.dp))
+                if (index < services.lastIndex) Spacer(GlanceModifier.height(rowGap))
             }
         }
     }
@@ -251,6 +252,7 @@ private fun WidgetServiceRow(
 ) {
     val isRunning = runtime.status == RunStatus.RUNNING || runtime.status == RunStatus.DEGRADED
     val isUnknown = runtime.status == RunStatus.UNKNOWN
+    val canToggle = !isPending && ((isRunning && service.canStop) || (!isRunning && service.canStart))
 
     val nameColor = when {
         isPending -> Color(0xFF505060)
@@ -337,8 +339,12 @@ private fun WidgetServiceRow(
         }
 
         // ── Actions ──────────────────────────────────────────
-        val actionTextSize = (settings.metaSize * 0.9f).sp
+        val actionTextSize = (settings.metaSize * 0.9f * settings.actionScale).sp
         val actionFont     = font
+        val buttonHPad     = (10f * settings.actionScale).dp
+        val buttonVPad     = (6f * settings.actionScale).dp
+        val openHPad       = (8f * settings.actionScale).dp
+        val openVPad       = (4f * settings.actionScale).dp
 
         Row(verticalAlignment = Alignment.CenterVertically) {
             // ── Open Link ──
@@ -353,7 +359,7 @@ private fun WidgetServiceRow(
                 ) {
                     Text(
                         text = "OPEN",
-                        modifier = GlanceModifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        modifier = GlanceModifier.padding(horizontal = openHPad, vertical = openVPad),
                         style = TextStyle(color = ColorProvider(Color(0xFF3399FF)), fontSize = actionTextSize, fontWeight = FontWeight.Bold, fontFamily = actionFont)
                     )
                 }
@@ -362,30 +368,40 @@ private fun WidgetServiceRow(
             // ── Power Button (Text Chip) ──
             val btnBg = when {
                 isPending -> Color(0xFF1A1A22)
+                !canToggle -> Color(0xFF15151B)
                 isRunning -> Color(theme.accentBg)
                 else      -> Color(0xFF1C0E0E)
             }
             val btnFg = when {
                 isPending -> Color(0xFF353545)
+                !canToggle -> Color(0xFF505060)
                 isRunning -> accent
                 else      -> Color(0xFFBB3333)
             }
             val btnLabel = when {
                 isPending -> "···"
+                !canToggle -> "LOCK"
                 isRunning -> "STOP"
                 else      -> "START"
             }
+            val powerModifier = GlanceModifier
+                .background(ColorProvider(btnBg))
+                .cornerRadius(6.dp)
+                .let {
+                    if (canToggle) {
+                        it.clickable(actionRunCallback<TogglePowerAction>(actionParametersOf(serviceIdKey to service.id)))
+                    } else {
+                        it
+                    }
+                }
 
             Box(
-                modifier = GlanceModifier
-                    .background(ColorProvider(btnBg))
-                    .cornerRadius(6.dp)
-                    .clickable(actionRunCallback<TogglePowerAction>(actionParametersOf(serviceIdKey to service.id))),
+                modifier = powerModifier,
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = btnLabel,
-                    modifier = GlanceModifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    modifier = GlanceModifier.padding(horizontal = buttonHPad, vertical = buttonVPad),
                     style = TextStyle(color = ColorProvider(btnFg), fontSize = actionTextSize, fontWeight = FontWeight.Bold, fontFamily = actionFont)
                 )
             }
@@ -400,15 +416,12 @@ private val serviceIdKey = ActionParameters.Key<String>("serviceId")
 class RefreshActionWidget : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
         Log.d(TAG, "RefreshActionWidget: triggered")
-        ServiceWidget().update(context, glanceId)
-    }
-}
-
-class ToggleMuteAction : ActionCallback {
-    override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
-        val serviceId = parameters[serviceIdKey] ?: return
-        Log.d(TAG, "ToggleMuteAction: serviceId=$serviceId")
-        ServiceManager(context).toggleMute(serviceId)
+        val manager = ServiceManager(context)
+        val services = manager.getSavedServices().filter {
+            it.isEnabledOnWidget &&
+            (it.type == ServiceType.WEB_PANEL || it.type == ServiceType.HYBRID)
+        }
+        manager.checkAllStatuses(services)
         ServiceWidget().update(context, glanceId)
     }
 }

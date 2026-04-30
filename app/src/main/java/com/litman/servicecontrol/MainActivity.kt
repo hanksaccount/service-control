@@ -32,22 +32,13 @@ private const val TAG = "ServiceCtrl"
 // ── Design tokens ─────────────────────────────────────────────────────────────
 private val BG      = Color(0xFF0D0D11)
 private val SURF    = Color(0xFF131318)
-private val SURF2   = Color(0xFF18181F)
 private val LINE    = Color(0xFF1C1C28)
 private val DIM     = Color(0xFF2E2E3C)
 private val MUTED   = Color(0xFF565666)
 private val SUB     = Color(0xFF8888A0)
 private val TEXT    = Color(0xFFEEEEF4)
 private val GREEN   = Color(0xFF00D966)
-private val CYAN    = Color(0xFF00C8DD)
-private val AMBER   = Color(0xFFFFB300)
 private val RED     = Color(0xFFCC3333)
-
-private fun accentBgOf(style: String) = when (style) {
-    "CYAN"  -> Color(0xFF0D2025)
-    "AMBER" -> Color(0xFF201900)
-    else    -> Color(0xFF0D2015)
-}
 
 // ── Activity ──────────────────────────────────────────────────────────────────
 
@@ -79,10 +70,8 @@ fun ServiceControlApp(manager: ServiceManager) {
     val pendingStates    = remember { mutableStateMapOf<String, String>() }
     val scope            = rememberCoroutineScope()
     
-    // The "real" settings synced with disk
-    var settings        by remember { mutableStateOf(manager.getWidgetSettings()) }
-    // The "draft" settings used for live UI updates during slider drag
-    var draftSettings   by remember { mutableStateOf(settings) }
+    val initialSettings = remember { manager.getWidgetSettings() }
+    var draftSettings   by remember { mutableStateOf(initialSettings) }
     
     var showSettings    by remember { mutableStateOf(false) }
 
@@ -125,10 +114,15 @@ fun ServiceControlApp(manager: ServiceManager) {
     }
 
     fun commitSettings(new: WidgetSettings) {
-        settings = new
+        draftSettings = new
         manager.saveWidgetSettings(new)
         Log.d(TAG, "[ServiceCtrl] commitSettings: saved and pushing widget update")
         pushWidget()
+    }
+
+    fun updateSettings(new: WidgetSettings, persist: Boolean = false) {
+        draftSettings = new
+        if (persist) commitSettings(new)
     }
 
     LaunchedEffect(Unit) {
@@ -181,8 +175,8 @@ fun ServiceControlApp(manager: ServiceManager) {
         if (showSettings) {
             SettingsPane(
                 settings = draftSettings,
-                onUpdate = { draftSettings = it },
-                onApply  = { commitSettings(draftSettings) }
+                onUpdate = ::updateSettings,
+                onApply  = ::commitSettings
             )
         } else {
             ServiceListPane(
@@ -219,8 +213,8 @@ private fun SectionLabel(text: String) {
 @Composable
 fun SettingsPane(
     settings: WidgetSettings,
-    onUpdate: (WidgetSettings) -> Unit,
-    onApply: () -> Unit
+    onUpdate: (WidgetSettings, Boolean) -> Unit,
+    onApply: (WidgetSettings) -> Unit
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -233,8 +227,8 @@ fun SettingsPane(
             SettingRow(label = "Name Size", value = "${settings.nameSize.toInt()} sp") {
                 SettingSlider(
                     value = settings.nameSize, min = 8f, max = 22f,
-                    onValueChange = { onUpdate(settings.copy(nameSize = it)) },
-                    onFinished    = onApply
+                    onValueChange = { onUpdate(settings.copy(nameSize = it), false) },
+                    onFinished    = { onApply(settings.copy(nameSize = it)) }
                 )
             }
         }
@@ -242,8 +236,8 @@ fun SettingsPane(
             SettingRow(label = "Meta Size", value = "${settings.metaSize.toInt()} sp") {
                 SettingSlider(
                     value = settings.metaSize, min = 6f, max = 16f,
-                    onValueChange = { onUpdate(settings.copy(metaSize = it)) },
-                    onFinished    = onApply
+                    onValueChange = { onUpdate(settings.copy(metaSize = it), false) },
+                    onFinished    = { onApply(settings.copy(metaSize = it)) }
                 )
             }
         }
@@ -254,8 +248,26 @@ fun SettingsPane(
             SettingRow(label = "Padding", value = "${settings.padding.toInt()} dp") {
                 SettingSlider(
                     value = settings.padding, min = 4f, max = 28f,
-                    onValueChange = { onUpdate(settings.copy(padding = it)) },
-                    onFinished    = onApply
+                    onValueChange = { onUpdate(settings.copy(padding = it), false) },
+                    onFinished    = { onApply(settings.copy(padding = it)) }
+                )
+            }
+        }
+        item {
+            SettingRow(label = "Row Gap", value = "${settings.rowSpacing.toInt()} dp") {
+                SettingSlider(
+                    value = settings.rowSpacing, min = 2f, max = 18f,
+                    onValueChange = { onUpdate(settings.copy(rowSpacing = it), false) },
+                    onFinished    = { onApply(settings.copy(rowSpacing = it)) }
+                )
+            }
+        }
+        item {
+            SettingRow(label = "Button Scale", value = "${(settings.actionScale * 100).toInt()} %") {
+                SettingSlider(
+                    value = settings.actionScale, min = 0.75f, max = 1.35f,
+                    onValueChange = { onUpdate(settings.copy(actionScale = it), false) },
+                    onFinished    = { onApply(settings.copy(actionScale = it)) }
                 )
             }
         }
@@ -263,8 +275,8 @@ fun SettingsPane(
             SettingRow(label = "Corner Radius", value = "${settings.cornerRadius.toInt()} dp") {
                 SettingSlider(
                     value = settings.cornerRadius, min = 0f, max = 28f,
-                    onValueChange = { onUpdate(settings.copy(cornerRadius = it)) },
-                    onFinished    = onApply
+                    onValueChange = { onUpdate(settings.copy(cornerRadius = it), false) },
+                    onFinished    = { onApply(settings.copy(cornerRadius = it)) }
                 )
             }
         }
@@ -272,8 +284,8 @@ fun SettingsPane(
             SettingRow(label = "Opacity", value = "${(settings.opacity / 255f * 100).toInt()} %") {
                 SettingSlider(
                     value = settings.opacity.toFloat(), min = 60f, max = 255f,
-                    onValueChange = { onUpdate(settings.copy(opacity = it.toInt())) },
-                    onFinished    = onApply
+                    onValueChange = { onUpdate(settings.copy(opacity = it.toInt()), false) },
+                    onFinished    = { onApply(settings.copy(opacity = it.toInt())) }
                 )
             }
         }
@@ -286,26 +298,26 @@ fun SettingsPane(
                 label    = "Uptime",
                 subtitle = "Show service uptime when running",
                 value    = settings.showMemory
-            ) { onUpdate(settings.copy(showMemory = it)); onApply() }
+            ) { onUpdate(settings.copy(showMemory = it), true) }
         }
         item {
             SettingToggle(
                 label    = "Column Headers",
                 subtitle = "Show SERVICE / CTRL labels",
                 value    = settings.showColumnHeaders
-            ) { onUpdate(settings.copy(showColumnHeaders = it)); onApply() }
+            ) { onUpdate(settings.copy(showColumnHeaders = it), true) }
         }
 
         // ── Font ────────────────────────────────────────────
         item { Spacer(Modifier.height(6.dp)); SectionLabel("FONT") }
         item {
-            FontPicker(settings.fontStyle) { onUpdate(settings.copy(fontStyle = it)); onApply() }
+            FontPicker(settings.fontStyle) { onUpdate(settings.copy(fontStyle = it), true) }
         }
 
         // ── Theme ──────────────────────────────────────────
         item { Spacer(Modifier.height(6.dp)); SectionLabel("THEME") }
         item {
-            ThemePicker(settings.theme) { onUpdate(settings.copy(theme = it)); onApply() }
+            ThemePicker(settings.theme) { onUpdate(settings.copy(theme = it), true) }
         }
 
         item { Spacer(Modifier.height(24.dp)) }
@@ -334,12 +346,17 @@ fun SettingSlider(
     min: Float,
     max: Float,
     onValueChange: (Float) -> Unit,
-    onFinished: (() -> Unit)? = null
+    onFinished: ((Float) -> Unit)? = null
 ) {
+    var latestValue by remember(value) { mutableStateOf(value) }
+
     Slider(
         value = value,
-        onValueChange = onValueChange,
-        onValueChangeFinished = onFinished,
+        onValueChange = {
+            latestValue = it
+            onValueChange(it)
+        },
+        onValueChangeFinished = { onFinished?.invoke(latestValue) },
         valueRange = min..max,
         modifier = Modifier.fillMaxWidth(),
         colors = SliderDefaults.colors(
@@ -526,9 +543,10 @@ fun ServiceRow(
     val scope      = rememberCoroutineScope()
     val isRunning  = runtime.status == RunStatus.RUNNING || runtime.status == RunStatus.DEGRADED
     val isUnknown  = runtime.status == RunStatus.UNKNOWN
+    val canToggle  = !isPending && ((isRunning && service.canStop) || (!isRunning && service.canStart))
     
     // Use current theme colors
-    val settings   = remember { manager.getWidgetSettings() }
+    val settings   = manager.getWidgetSettings()
     val theme      = Themes.find(settings.theme)
     val accent     = Color(theme.accent)
     val accentBg   = Color(theme.accentBg)
@@ -546,17 +564,20 @@ fun ServiceRow(
     
     val btnBg = when {
         isPending  -> Color(0xFF151520)
+        !canToggle -> Color(0xFF15151B)
         isRunning  -> accentBg
         else       -> Color(0xFF1E1010)
     }
     val btnFg = when {
         isPending  -> DIM
+        !canToggle -> MUTED
         isRunning  -> accent
         isUnknown  -> MUTED
         else       -> RED
     }
     val btnLabel = when {
         isPending  -> "···"
+        !canToggle -> "LOCK"
         isRunning  -> "STOP"
         else       -> "START"
     }
@@ -595,7 +616,7 @@ fun ServiceRow(
                 .background(btnBg, RoundedCornerShape(7.dp))
                 .border(1.dp, btnFg.copy(alpha = 0.25f), RoundedCornerShape(7.dp))
                 .then(
-                    if (!isPending) Modifier.clickable {
+                    if (canToggle) Modifier.clickable {
                         scope.launch {
                             Log.d(TAG, "[ServiceCtrl] ServiceRow TAP: id=${service.id} action=${if (isRunning) "STOP" else "START"}")
                             manager.togglePower(service.id, isRunning)
