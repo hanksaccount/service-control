@@ -1,8 +1,46 @@
 package com.litman.servicecontrol.widget
 
-import androidx.glance.appwidget.GlanceAppWidget
-import androidx.glance.appwidget.GlanceAppWidgetReceiver
+import android.appwidget.AppWidgetManager
+import android.appwidget.AppWidgetProvider
+import android.content.Context
+import android.content.Intent
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
-class ServiceWidgetReceiver : GlanceAppWidgetReceiver() {
-    override val glanceAppWidget: GlanceAppWidget = ServiceWidget()
+class ServiceWidgetReceiver : AppWidgetProvider() {
+    override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
+        val pending = goAsync()
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                ServiceWidget.update(context, appWidgetManager, appWidgetIds)
+            } finally {
+                pending.finish()
+            }
+        }
+    }
+
+    override fun onReceive(context: Context, intent: Intent) {
+        when (intent.action) {
+            ServiceWidget.ACTION_REFRESH, ServiceWidget.ACTION_TOGGLE -> handleWidgetAction(context, intent)
+            else -> super.onReceive(context, intent)
+        }
+    }
+
+    private fun handleWidgetAction(context: Context, intent: Intent) {
+        val pending = goAsync()
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                when (intent.action) {
+                    ServiceWidget.ACTION_REFRESH -> ServiceWidget.refreshStatuses(context)
+                    ServiceWidget.ACTION_TOGGLE -> {
+                        val serviceId = intent.getStringExtra(ServiceWidget.EXTRA_SERVICE_ID)
+                        if (serviceId != null) ServiceWidget.toggle(context, serviceId)
+                    }
+                }
+            } finally {
+                pending.finish()
+            }
+        }
+    }
 }

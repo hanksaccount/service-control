@@ -2,8 +2,12 @@ package com.litman.servicecontrol.model
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Handler
+import android.os.Looper
 import android.content.SharedPreferences
 import android.util.Log
+import android.widget.Toast
 import com.google.gson.Gson
 import com.google.gson.JsonParser
 import com.google.gson.reflect.TypeToken
@@ -12,10 +16,13 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.net.InetSocketAddress
 import java.net.Socket
+import kotlin.math.roundToInt
 
 private const val TAG = "ServiceCtrl"
+private const val TERMUX_RUN_COMMAND_PERMISSION = "com.termux.permission.RUN_COMMAND"
 
 // ── Domain models ────────────────────────────────────────────────────────────
 
@@ -81,7 +88,8 @@ object TemplateRegistry {
             killPatterns = listOf("fuel_service.sh", "server/index.js", "vite"),
             notificationIds = listOf("fuel-intel"),
             checkMode = StatusCheckMode.PORT,
-            showInWidget = true, canOpen = true, openUrl = "http://127.0.0.1:5210"
+            showInWidget = true, canOpen = true, openUrl = "http://127.0.0.1:5210",
+            contractPath = "$HOME/projects/service-control/services/fuel-intel"
         ),
         ServiceTemplate(
             name = "elpris", displayName = "elpris",
@@ -176,7 +184,7 @@ class ServiceManager(val context: Context) {
     private val termuxBash = "/data/data/com.termux/files/usr/bin/bash"
 
     // Bump this when buildDefaultServices() changes port/path/mode config.
-    private val SERVICES_VERSION = 5  // v5: dashboard migrerad till contractPath
+    private val SERVICES_VERSION = 7  // v7: force refresh of contract-based start/stop config
 
     // ── Settings ─────────────────────────────────────────────────────────────
 
@@ -221,14 +229,14 @@ class ServiceManager(val context: Context) {
     fun markStarting(serviceId: String) {
         prefs.edit().putString("pending_$serviceId", "STARTING").commit()
         // Optimistic cache update for immediate widget/app feedback
-        updateSingleCachedStatus(serviceId, ServiceRuntime(RunStatus.STARTING))
+        updateSingleCachedStatus(serviceId, ServiceRuntime(RunStatus.STARTING, "command sent"))
         Log.d(TAG, "[ServiceCtrl] markStarting: $serviceId (optimistic cache set)")
     }
 
     fun markStopping(serviceId: String) {
         prefs.edit().putString("pending_$serviceId", "STOPPING").commit()
         // Optimistic cache update for immediate widget/app feedback
-        updateSingleCachedStatus(serviceId, ServiceRuntime(RunStatus.STOPPING))
+        updateSingleCachedStatus(serviceId, ServiceRuntime(RunStatus.STOPPING, "command sent"))
         Log.d(TAG, "[ServiceCtrl] markStopping: $serviceId (optimistic cache set)")
     }
 
@@ -318,7 +326,7 @@ class ServiceManager(val context: Context) {
     // ── Status checks ─────────────────────────────────────────────────────────
 
     suspend fun checkStatus(item: ServiceItem): ServiceRuntime = when (item.checkMode) {
-        StatusCheckMode.ACTION  -> ServiceRuntime.UNKNOWN
+        StatusCheckMode.ACTION  -> ServiceRuntime(RunStatus.UNKNOWN, "manual action")
         StatusCheckMode.PORT    -> checkTcpPorts(item.ports)
         StatusCheckMode.PROCESS -> checkProcess(item)
     }
@@ -338,7 +346,7 @@ class ServiceManager(val context: Context) {
     }
 
     private suspend fun checkTcpPorts(ports: List<Int>): ServiceRuntime {
-        if (ports.isEmpty()) return ServiceRuntime.UNKNOWN
+        if (ports.isEmpty()) return ServiceRuntime(RunStatus.UNKNOWN, "no ports configured")
         
         return withContext(Dispatchers.IO) {
             var upCount = 0
@@ -360,7 +368,7 @@ class ServiceManager(val context: Context) {
             }
             
             Log.d(TAG, "[ServiceCtrl] checkTcpPorts: ports=$ports → $status ($upCount/${ports.size} up)")
-            ServiceRuntime(status)
+            ServiceRuntime(status, "ports $upCount/${ports.size} up (${ports.joinToString(", ")})")
         }
     }
 
@@ -375,11 +383,134 @@ class ServiceManager(val context: Context) {
                     false
                 }
             }
-            if (isUp) return ServiceRuntime(RunStatus.RUNNING)
+            if (isUp) return ServiceRuntime(RunStatus.RUNNING, "process match: $match")
         }
         // Fallback to port check
         return checkTcpPorts(item.ports)
     }
+
+    fun hasRunCommandPermission(): Boolean =
+        context.checkSelfPermission(TERMUX_RUN_COMMAND_PERMISSION) == PackageManager.PERMISSION_GRANTED
+
+    suspend fun collectStats(item: ServiceItem): ServiceStats = withContext(Dispatchers.IO) {
+        val patterns = statsPatterns(item)
+        if (patterns.isEmpty()) {
+            return@withContext ServiceStats(detail = "no process patterns")
+        }
+
+        val rows = mutableListOf<ProcessStatRow>()
+        patterns.forEach { pattern ->
+            rows += readProcessRows(pattern)
+        }
+
+        val uniqueRows = rows.distinctBy { it.pid }
+        var cpu = 0f
+        var rssKb = 0L
+        uniqueRows.forEach {
+            cpu += it.cpuPercent
+            rssKb += it.rssKb
+        }
+        val memoryMb = rssKb.toFloat() / 1024f
+        val impact = estimateImpact(cpu, memoryMb, uniqueRows.size)
+        val detail = if (uniqueRows.isEmpty()) {
+            "no matching processes"
+        } else {
+            "${uniqueRows.size} proc, ${formatOneDecimal(cpu)}% cpu, ${formatOneDecimal(memoryMb)} MB ram"
+        }
+
+        ServiceStats(
+            processCount = uniqueRows.size,
+            cpuPercent = cpu,
+            memoryMb = memoryMb,
+            impact = impact,
+            detail = detail
+        )
+    }
+
+    suspend fun collectAllStats(services: List<ServiceItem>): Map<String, ServiceStats> =
+        coroutineScope {
+            services
+                .filter { it.checkMode != StatusCheckMode.ACTION }
+                .map { service -> async { service.id to collectStats(service) } }
+                .awaitAll()
+                .toMap()
+        }
+
+    private fun statsPatterns(item: ServiceItem): List<String> {
+        val all = mutableListOf<String>()
+        item.processMatch?.takeIf { it.isNotBlank() }?.let { all += it }
+        all += item.killPatterns.filter { it.isNotBlank() }
+        if (item.contractPath != null) all += item.name
+        return all.distinct()
+    }
+
+    private fun readProcessRows(pattern: String): List<ProcessStatRow> {
+        return try {
+            val proc = ProcessBuilder("sh", "-c", "ps -A -o PID,PCPU,RSS,ARGS 2>/dev/null | grep -F ${shellQuote(pattern)} | grep -v grep")
+                .redirectErrorStream(true)
+                .start()
+            val output = proc.inputStream.bufferedReader().readText()
+            proc.waitFor()
+            output.lines().mapNotNull { parseProcessRow(it) }
+                .ifEmpty { readProcessRowsFromProc(pattern) }
+        } catch (e: Exception) {
+            Log.w(TAG, "readProcessRows: failed for pattern=$pattern", e)
+            readProcessRowsFromProc(pattern)
+        }
+    }
+
+    private fun readProcessRowsFromProc(pattern: String): List<ProcessStatRow> {
+        return try {
+            val proc = ProcessBuilder("sh", "-c", "pgrep -f ${shellQuote(pattern)} 2>/dev/null")
+                .redirectErrorStream(true)
+                .start()
+            val output = proc.inputStream.bufferedReader().readText()
+            proc.waitFor()
+            output.lines()
+                .mapNotNull { it.trim().toIntOrNull() }
+                .map { pid -> ProcessStatRow(pid, 0f, readRssKb(pid)) }
+        } catch (e: Exception) {
+            Log.w(TAG, "readProcessRowsFromProc: failed for pattern=$pattern", e)
+            emptyList()
+        }
+    }
+
+    private fun readRssKb(pid: Int): Long {
+        return try {
+            File("/proc/$pid/status").readLines()
+                .firstOrNull { it.startsWith("VmRSS:") }
+                ?.split(Regex("\\s+"))
+                ?.firstOrNull { it.toLongOrNull() != null }
+                ?.toLongOrNull() ?: 0L
+        } catch (e: Exception) {
+            0L
+        }
+    }
+
+    private fun parseProcessRow(line: String): ProcessStatRow? {
+        val parts = line.trim().split(Regex("\\s+"), limit = 4)
+        if (parts.size < 3) return null
+        val pid = parts[0].toIntOrNull() ?: return null
+        val cpu = parts[1].toFloatOrNull() ?: 0f
+        val rss = parts[2].toLongOrNull() ?: 0L
+        return ProcessStatRow(pid, cpu, rss)
+    }
+
+    private fun estimateImpact(cpu: Float, memoryMb: Float, processCount: Int): ResourceImpact = when {
+        processCount == 0 -> ResourceImpact.UNKNOWN
+        cpu >= 15f || memoryMb >= 700f -> ResourceImpact.HIGH
+        cpu >= 4f || memoryMb >= 250f || processCount >= 4 -> ResourceImpact.MEDIUM
+        else -> ResourceImpact.LOW
+    }
+
+    private fun formatOneDecimal(value: Float): String =
+        (value * 10f).roundToInt().let { "${it / 10}.${it % 10}" }
+
+    private data class ProcessStatRow(
+        val pid: Int,
+        val cpuPercent: Float,
+        val rssKb: Long
+    )
 
     // ── Actions ───────────────────────────────────────────────────────────────
 
@@ -529,6 +660,12 @@ class ServiceManager(val context: Context) {
     }
 
     private fun sendTermuxShell(command: String): Boolean {
+        if (context.checkSelfPermission(TERMUX_RUN_COMMAND_PERMISSION) != PackageManager.PERMISSION_GRANTED) {
+            Log.e(TAG, "sendTermuxShell: missing $TERMUX_RUN_COMMAND_PERMISSION")
+            showToast("Missing Termux command permission. Open app and allow it.")
+            return false
+        }
+
         val intent = Intent("com.termux.RUN_COMMAND").apply {
             setPackage("com.termux")
             setClassName("com.termux", "com.termux.app.RunCommandService")
@@ -544,7 +681,14 @@ class ServiceManager(val context: Context) {
             true
         } catch (e: Exception) {
             Log.e(TAG, "sendTermuxShell: startService failed. Check Termux RUN_COMMAND permission and allow-external-apps.", e)
+            showToast("Termux command failed: ${e.javaClass.simpleName}")
             false
+        }
+    }
+
+    private fun showToast(message: String) {
+        Handler(Looper.getMainLooper()).post {
+            Toast.makeText(context.applicationContext, message, Toast.LENGTH_LONG).show()
         }
     }
 

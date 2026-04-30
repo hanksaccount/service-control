@@ -1,7 +1,10 @@
 package com.litman.servicecontrol
 
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -27,6 +30,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private const val TAG = "ServiceCtrl"
+private const val TERMUX_RUN_COMMAND_PERMISSION = "com.termux.permission.RUN_COMMAND"
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 private val BG      = Color(0xFF080A0D)
@@ -49,6 +53,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         manager = ServiceManager(this)
         manager.ensureServiceConfig()
+        ensureTermuxPermission()
         Log.d(TAG, "MainActivity: onCreate complete")
 
         setContent {
@@ -59,6 +64,18 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    private fun ensureTermuxPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+        if (checkSelfPermission(TERMUX_RUN_COMMAND_PERMISSION) == PackageManager.PERMISSION_GRANTED) return
+
+        requestPermissions(arrayOf(TERMUX_RUN_COMMAND_PERMISSION), 42)
+        Toast.makeText(
+            this,
+            "Grant Termux command permission for start/stop controls.",
+            Toast.LENGTH_LONG
+        ).show()
+    }
 }
 
 // ── App root ──────────────────────────────────────────────────────────────────
@@ -67,6 +84,7 @@ class MainActivity : ComponentActivity() {
 fun ServiceControlApp(manager: ServiceManager) {
     var services        by remember { mutableStateOf(manager.getSavedServices()) }
     val runtimes         = remember { mutableStateMapOf<String, ServiceRuntime>() }
+    val serviceStats     = remember { mutableStateMapOf<String, ServiceStats>() }
     val pendingStates    = remember { mutableStateMapOf<String, String>() }
     val scope            = rememberCoroutineScope()
     
@@ -79,10 +97,12 @@ fun ServiceControlApp(manager: ServiceManager) {
         scope.launch {
             services = manager.getSavedServices()
             val statuses = manager.checkAllStatuses(services)
+            val stats = manager.collectAllStats(services)
             
             services.forEach { s ->
                 val runtime = statuses[s.id] ?: ServiceRuntime.UNKNOWN
                 runtimes[s.id] = runtime
+                serviceStats[s.id] = stats[s.id] ?: ServiceStats.EMPTY
                 
                 // Clear pending if reality matches target
                 val pending = manager.getPendingState(s.id)
@@ -189,6 +209,7 @@ fun ServiceControlApp(manager: ServiceManager) {
             ServiceListPane(
                 services        = services,
                 runtimes        = runtimes,
+                stats           = serviceStats,
                 pendingStates   = pendingStates,
                 manager         = manager,
                 onRefresh       = ::refreshAll,
@@ -507,6 +528,7 @@ fun ThemeCard(
 fun ServiceListPane(
     services: List<ServiceItem>,
     runtimes: Map<String, ServiceRuntime>,
+    stats: Map<String, ServiceStats>,
     pendingStates: Map<String, String>,
     manager: ServiceManager,
     onRefresh: () -> Unit,
@@ -519,12 +541,22 @@ fun ServiceListPane(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
+        item {
+            DiagnosticsStrip(
+                hasTermuxPermission = manager.hasRunCommandPermission(),
+                serviceCount = panels.size,
+                runningCount = runtimes.values.count {
+                    it.status == RunStatus.RUNNING || it.status == RunStatus.DEGRADED
+                }
+            )
+        }
         if (panels.isNotEmpty()) {
             item { SectionLabel("PROCESSES") }
             items(panels) { service ->
                 ServiceRow(
                     service      = service,
                     runtime      = runtimes[service.id] ?: ServiceRuntime.UNKNOWN,
+                    stats        = stats[service.id] ?: ServiceStats.EMPTY,
                     isPending    = pendingStates.containsKey(service.id),
                     manager      = manager,
                     onRefresh    = onRefresh,
@@ -542,9 +574,40 @@ fun ServiceListPane(
 }
 
 @Composable
+fun DiagnosticsStrip(
+    hasTermuxPermission: Boolean,
+    serviceCount: Int,
+    runningCount: Int
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(SURF2)
+            .border(1.dp, LINE, RoundedCornerShape(12.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column {
+            Text("APP DIAGNOSTICS", color = SUB, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.4.sp)
+            Text("$runningCount/$serviceCount services responding", color = MUTED, fontSize = 11.sp)
+        }
+        Text(
+            text = if (hasTermuxPermission) "TERMUX OK" else "TERMUX BLOCKED",
+            color = if (hasTermuxPermission) GREEN else RED,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.8.sp
+        )
+    }
+}
+
+@Composable
 fun ServiceRow(
     service: ServiceItem,
     runtime: ServiceRuntime,
+    stats: ServiceStats,
     isPending: Boolean,
     manager: ServiceManager,
     onRefresh: () -> Unit,
@@ -561,11 +624,13 @@ fun ServiceRow(
     val accent     = Color(theme.accent)
     val accentBg   = Color(theme.accentBg)
 
-    val modeStr = when {
-        service.checkMode == StatusCheckMode.PORT && service.port != null -> ":${service.port}"
-        service.checkMode == StatusCheckMode.PROCESS -> "proc"
-        else -> "fork"
+    val modeStr = serviceDiagnosticMode(service)
+    val runtimeDetail = when {
+        isPending -> "pending ${manager.getPendingState(service.id)?.lowercase() ?: "action"}"
+        runtime.detail.isNotBlank() -> runtime.detail
+        else -> "waiting for first status check"
     }
+    val statsText = serviceStatsText(stats)
 
     // Visual state derived from pending / runtime
     val nameColor  = if (isPending) MUTED else TEXT
@@ -621,9 +686,23 @@ fun ServiceRow(
             )
             Spacer(Modifier.height(1.dp))
             Text(
-                text = if (isPending) statusText else "$modeStr  ·  $statusText",
+                text = if (isPending) "$statusText  ·  $runtimeDetail" else "$modeStr  ·  $statusText",
                 color = MUTED, fontSize = 11.sp
             )
+            Text(
+                text = runtimeDetail,
+                color = DIM,
+                fontSize = 10.sp
+            )
+            if (statsText.isNotBlank()) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = statsText,
+                    color = resourceImpactColor(stats.impact),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
         }
 
         // Power button — disabled while pending
@@ -635,9 +714,12 @@ fun ServiceRow(
                     if (canToggle) Modifier.clickable {
                         scope.launch {
                             Log.d(TAG, "[ServiceCtrl] ServiceRow TAP: id=${service.id} action=${if (isRunning) "STOP" else "START"}")
-                            manager.togglePower(service.id, isRunning)
-                            
-                            // Visual feedback loop: Wait for Termux + verify
+                            val commandStarted = manager.togglePower(service.id, isRunning)
+                            onRefresh()
+                            onPushWidget()
+                            if (!commandStarted) return@launch
+
+                            // Verify after Termux has had time to spawn or stop the service.
                             delay(1500)
                             onRefresh()
                             onPushWidget()
@@ -654,6 +736,29 @@ fun ServiceRow(
             )
         }
     }
+}
+
+private fun serviceDiagnosticMode(service: ServiceItem): String = when (service.checkMode) {
+    StatusCheckMode.PORT -> if (service.ports.isEmpty()) "ports: none" else "ports: ${service.ports.joinToString(",")}"
+    StatusCheckMode.PROCESS -> "process: ${service.processMatch ?: "unset"}"
+    StatusCheckMode.ACTION -> "action"
+}
+
+private fun serviceStatsText(stats: ServiceStats): String {
+    if (stats.processCount == 0) return stats.detail
+    return "${stats.processCount} proc  ·  ${formatOneDecimal(stats.cpuPercent)}% cpu  ·  ${formatOneDecimal(stats.memoryMb)} MB  ·  ${stats.impact.name.lowercase()} impact"
+}
+
+private fun resourceImpactColor(impact: ResourceImpact): Color = when (impact) {
+    ResourceImpact.LOW -> GREEN
+    ResourceImpact.MEDIUM -> Color(0xFFFFB84D)
+    ResourceImpact.HIGH -> RED
+    ResourceImpact.UNKNOWN -> DIM
+}
+
+private fun formatOneDecimal(value: Float): String {
+    val scaled = kotlin.math.round(value * 10f).toInt()
+    return "${scaled / 10}.${kotlin.math.abs(scaled % 10)}"
 }
 
 @Composable

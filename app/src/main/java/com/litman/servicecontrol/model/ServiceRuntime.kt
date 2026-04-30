@@ -29,12 +29,34 @@ enum class ServiceGroup {
 }
 
 data class ServiceRuntime(
-    val status: RunStatus
+    val status: RunStatus,
+    val detail: String = "",
+    val checkedAt: Long = System.currentTimeMillis()
 ) {
     companion object {
         val UNKNOWN = ServiceRuntime(RunStatus.UNKNOWN)
         val STOPPED = ServiceRuntime(RunStatus.STOPPED)
     }
+}
+
+data class ServiceStats(
+    val processCount: Int = 0,
+    val cpuPercent: Float = 0f,
+    val memoryMb: Float = 0f,
+    val impact: ResourceImpact = ResourceImpact.UNKNOWN,
+    val detail: String = "",
+    val checkedAt: Long = System.currentTimeMillis()
+) {
+    companion object {
+        val EMPTY = ServiceStats()
+    }
+}
+
+enum class ResourceImpact {
+    LOW,
+    MEDIUM,
+    HIGH,
+    UNKNOWN
 }
 
 fun statusDotColor(runtime: ServiceRuntime): Int = when (runtime.status) {
