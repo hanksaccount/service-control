@@ -577,7 +577,8 @@ fun ServiceListPane(
 fun DiagnosticsStrip(
     hasTermuxPermission: Boolean,
     serviceCount: Int,
-    runningCount: Int
+    runningCount: Int,
+    networkUsage: String? = null
 ) {
     Row(
         modifier = Modifier
@@ -591,7 +592,13 @@ fun DiagnosticsStrip(
     ) {
         Column {
             Text("APP DIAGNOSTICS", color = SUB, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.4.sp)
-            Text("$runningCount/$serviceCount services responding", color = MUTED, fontSize = 11.sp)
+            Text(
+                text = buildString {
+                    append("$runningCount/$serviceCount services responding")
+                    if (networkUsage != null) append("  ·  $networkUsage")
+                },
+                color = MUTED, fontSize = 11.sp
+            )
         }
         Text(
             text = if (hasTermuxPermission) "TERMUX OK" else "TERMUX BLOCKED",
@@ -789,5 +796,8 @@ fun ActionRow(action: ServiceItem, manager: ServiceManager, onRefresh: () -> Uni
              fontSize = 14.sp, modifier = Modifier.weight(1f))
         Text("RUN", color = Color(0xFF0088CC),
              fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
+    }
+}
+Weight = FontWeight.Bold, letterSpacing = 0.8.sp)
     }
 }

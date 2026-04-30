@@ -786,6 +786,27 @@ class ServiceManager(val context: Context) {
         }
     }
 
+    // ── Network usage tracking ────────────────────────────────────────────────
+
+    fun getAppNetworkUsage(): String {
+        val uid = context.applicationInfo.uid
+        val rxBytes = android.net.TrafficStats.getUidRxBytes(uid)
+        val txBytes = android.net.TrafficStats.getUidTxBytes(uid)
+        
+        if (rxBytes == android.net.TrafficStats.UNSUPPORTED.toLong() || txBytes == android.net.TrafficStats.UNSUPPORTED.toLong()) {
+            return "net N/A"
+        }
+        
+        val rxKb = rxBytes / 1024f
+        val txKb = txBytes / 1024f
+        
+        return if (rxKb > 1024 || txKb > 1024) {
+            "${formatOneDecimal(rxKb / 1024f)}↓ ${formatOneDecimal(txKb / 1024f)}↑ MB"
+        } else {
+            "${rxKb.roundToInt()}↓ ${txKb.roundToInt()}↑ KB"
+        }
+    }
+
     /** Scan .sh scripts and merge into saved list. */
     fun parseScanResult(stdout: String): List<ServiceItem> {
         val lines   = stdout.lines().map { it.trim() }.filter { it.endsWith(".sh") }

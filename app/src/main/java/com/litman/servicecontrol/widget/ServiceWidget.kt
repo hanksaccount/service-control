@@ -99,9 +99,17 @@ object ServiceWidget {
             status == RunStatus.RUNNING || status == RunStatus.DEGRADED
         }
 
+        val summary = buildString {
+            append("$activeCount/${services.size} online")
+            if (settings.showNetworkUsage) {
+                append("  ·  ")
+                append(ServiceManager(context).getAppNetworkUsage())
+            }
+        }
+
         views.setInt(R.id.widget_root, "setBackgroundColor", argb(settings.opacity, 8, 10, 13))
         views.setTextViewText(R.id.widget_title, "SERVICE CONTROL")
-        views.setTextViewText(R.id.widget_summary, "$activeCount/${services.size} online")
+        views.setTextViewText(R.id.widget_summary, summary)
         val rootPadding = dp(context, settings.padding)
         views.setViewPadding(R.id.widget_root, rootPadding, rootPadding, rootPadding, rootPadding)
         views.setTextColor(R.id.widget_title, Color.rgb(244, 247, 250))
