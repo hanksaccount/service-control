@@ -26,6 +26,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.litman.servicecontrol.model.*
 import com.litman.servicecontrol.widget.WidgetUpdater
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -789,14 +792,18 @@ fun ActionRow(action: ServiceItem, manager: ServiceManager, onRefresh: () -> Uni
             .border(1.dp, LINE, RoundedCornerShape(12.dp))
             .clickable {
                 Log.d(TAG, "ActionRow: running ${action.label}")
-                if (action.id == "runfull") {
-                    manager.startAllEligible()
-                } else if (action.id == "stopall") {
-                    manager.stopAll()
-                } else {
-                    manager.runTermuxScript(action.scriptPath)
+                val scope = (manager.context as? ComponentActivity)?.lifecycleScope ?: CoroutineScope(Dispatchers.Main)
+                scope.launch {
+                    if (action.id == "runfull") {
+                        manager.startAllEligible()
+                    } else if (action.id == "stopall") {
+                        manager.stopAll()
+                    } else {
+                        manager.runTermuxScript(action.scriptPath)
+                    }
+                    onRefresh()
+                    onPushWidget()
                 }
-                onRefresh()
             }
             .padding(horizontal = 12.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically

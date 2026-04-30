@@ -671,44 +671,62 @@ class ServiceManager(val context: Context) {
         return waitForToggleCompletion(serviceId, isRunning)
     }
 
-    fun startAllEligible() {
+    suspend fun startAllEligible() {
         Log.d(TAG, "startAllEligible: Starting all non-manually stopped services")
         
         val services = getSavedServices()
         for (item in services) {
             if (item.type == ServiceType.ACTION_SCRIPT) continue
-            if (item.isManuallyStopped) {
-                Log.d(TAG, "startAllEligible: skipping ${item.label} (manually stopped)")
+            
+            // Re-verify status and sync flags before deciding
+            val runtime = checkAndCacheStatus(item)
+            val isRunning = runtime.status == RunStatus.RUNNING || runtime.status == RunStatus.DEGRADED
+            
+            if (isRunning) {
+                Log.d(TAG, "startAllEligible: skipping ${item.label} (already running)")
                 continue
             }
-            if (!item.canStart) {
-                Log.d(TAG, "startAllEligible: skipping ${item.label} (start disabled)")
+
+            // After sync, re-read service item to get updated isManuallyStopped
+            val freshItem = getSavedServices().find { it.id == item.id } ?: item
+            if (freshItem.isManuallyStopped) {
+                Log.d(TAG, "startAllEligible: skipping ${freshItem.label} (manually stopped flag exists)")
                 continue
             }
-            Log.d(TAG, "startAllEligible: starting ${item.label}")
-            startService(item)
+            if (!freshItem.canStart) {
+                Log.d(TAG, "startAllEligible: skipping ${freshItem.label} (start disabled)")
+                continue
+            }
+            Log.d(TAG, "startAllEligible: starting ${freshItem.label}")
+            startService(freshItem)
         }
         sendTermuxShell("termux-toast ${shellQuote("Native app-start slutförd")} 2>/dev/null || true")
     }
 
-    fun stopAll() {
+    suspend fun stopAll() {
         Log.d(TAG, "stopAll: Stopping all services")
         
-        val services = getSavedServices().toMutableList()
-        var changed = false
-        for (i in services.indices) {
-            val item = services[i]
+        val services = getSavedServices()
+        for (item in services) {
             if (item.type == ServiceType.ACTION_SCRIPT) continue
+            
+            // Re-verify status
+            val runtime = checkAndCacheStatus(item)
+            val isRunning = runtime.status == RunStatus.RUNNING || runtime.status == RunStatus.DEGRADED
+            
+            if (!isRunning) {
+                Log.d(TAG, "stopAll: skipping ${item.label} (already stopped)")
+                continue
+            }
+
             if (!item.canStop) {
                 Log.d(TAG, "stopAll: skipping ${item.label} (stop disabled)")
                 continue
             }
             
-            services[i] = item.copy(isManuallyStopped = true)
-            changed = true
+            updateManualStopState(item.id, true)
             stopService(item)
         }
-        if (changed) saveServices(services)
         sendTermuxShell("termux-toast ${shellQuote("Alla tjänster stoppade")} 2>/dev/null || true")
     }
 

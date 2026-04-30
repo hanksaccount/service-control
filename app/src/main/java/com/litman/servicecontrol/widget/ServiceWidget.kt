@@ -67,21 +67,41 @@ object ServiceWidget {
     suspend fun toggle(context: Context, serviceId: String) {
         val appContext = context.applicationContext
         val manager = ServiceManager(appContext)
+        
+        // Handle special bulk actions
+        if (serviceId == "runfull") {
+            manager.startAllEligible()
+            updateAll(appContext)
+            return
+        }
+        if (serviceId == "stopall") {
+            manager.stopAll()
+            updateAll(appContext)
+            return
+        }
+
         val service = manager.getSavedServices().find { it.id == serviceId } ?: return
+        
+        // 1. Re-check status before starting to ensure we have fresh state
         val current = manager.checkAndCacheStatus(service)
         val isRunning = current.status == RunStatus.RUNNING || current.status == RunStatus.DEGRADED
         
-        // Start the command immediately
+        // 2. Trigger the command
         val commandStarted = manager.togglePower(serviceId, isRunning)
         
-        // Update widget immediately to show the "pending" state
+        // 3. Update widget immediately to show "pending" or intermediate state
         updateAll(appContext)
         
         if (!commandStarted) return
         
-        // We do NOT call waitForToggleCompletion here anymore as it blocks the coroutine.
-        // Instead, the background refresh or subsequent manual refreshes will catch the state change.
-        // Or we could launch a separate detached scope for waiting if we really want "active" polling.
+        // 4. Brief delay to allow the shell command to at least start/create flags
+        kotlinx.coroutines.delay(1200)
+        
+        // 5. Re-verify status and update cache (this will also sync our new stop flags)
+        manager.checkAndCacheStatus(service)
+        
+        // 6. Final UI refresh
+        updateAll(appContext)
     }
 
     private fun render(
