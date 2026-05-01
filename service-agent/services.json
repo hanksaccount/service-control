@@ -1,0 +1,42 @@
+[
+  {
+    "id": "fuel-intel",
+    "label": "Fuel Intel",
+    "scriptPath": "/data/data/com.termux/files/home/projects/service-control/services/fuel-intel/start.sh",
+    "startCommand": "bash /data/data/com.termux/files/home/projects/service-control/services/fuel-intel/start.sh",
+    "checkMode": "port",
+    "port": 5210,
+    "processMatch": "fuel-intel|fuel_service.sh|server/index.js|vite",
+    "stopCommand": "bash /data/data/com.termux/files/home/projects/service-control/services/fuel-intel/stop.sh"
+  },
+  {
+    "id": "dashboard",
+    "label": "Dashboard",
+    "scriptPath": "/data/data/com.termux/files/home/projects/service-control/services/dashboard/start.sh",
+    "startCommand": "bash /data/data/com.termux/files/home/projects/service-control/services/dashboard/start.sh",
+    "checkMode": "port",
+    "port": 5000,
+    "processMatch": "dashboard|battery_monitor.sh|services/dashboard",
+    "stopCommand": "bash /data/data/com.termux/files/home/projects/service-control/services/dashboard/stop.sh"
+  },
+  {
+    "id": "elpris",
+    "label": "Elpris",
+    "scriptPath": "/data/data/com.termux/files/home/projects/service-control/services/elpris/start.sh",
+    "startCommand": "bash /data/data/com.termux/files/home/projects/service-control/services/elpris/start.sh",
+    "checkMode": "port",
+    "port": 5100,
+    "processMatch": "elpris|server.py|services/elpris",
+    "stopCommand": "bash /data/data/com.termux/files/home/projects/service-control/services/elpris/stop.sh"
+  },
+  {
+    "id": "autosort",
+    "label": "AutoSort",
+    "scriptPath": "/data/data/com.termux/files/home/projects/service-control/services/autosort/start.sh",
+    "startCommand": "bash /data/data/com.termux/files/home/projects/service-control/services/autosort/start.sh",
+    "checkMode": "port",
+    "port": 5300,
+    "processMatch": "autosort|auto_sort_service.sh|panel-start.sh",
+    "stopCommand": "bash /data/data/com.termux/files/home/projects/service-control/services/autosort/stop.sh"
+  }
+]
