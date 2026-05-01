@@ -64,28 +64,7 @@ fun ServiceControlApp(manager: ServiceManager) {
     }
 
     Column(modifier = Modifier.padding(16.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("SERVICE CONTROL", fontSize = 20.sp, fontWeight = FontWeight.Black, color = Color.White)
-            Row {
-                TextButton(onClick = { 
-                    scope.launch {
-                        // Denna triggar om-scanning av filer
-                        manager.runAction(ServiceItem("scan", "scan", scriptPath = ".shortcuts/scan.sh"))
-                        delay(1000)
-                        refreshAll()
-                    }
-                }) {
-                    Text("SCAN", color = Color(0xFF00AAFF), fontWeight = FontWeight.Bold)
-                }
-                IconButton(onClick = { refreshAll() }) {
-                    Text("🔄", fontSize = 20.sp)
-                }
-            }
-        }
+        Text("SERVICE CONTROL", fontSize = 20.sp, fontWeight = FontWeight.Black, color = Color.White)
         ImpactHeader(
             services = services,
             runtimes = runtimes,
@@ -227,7 +206,6 @@ fun ServiceRow(service: ServiceItem, runtime: ServiceRuntime, manager: ServiceMa
 @Composable
 fun ActionRow(action: ServiceItem, manager: ServiceManager, onRefresh: () -> Unit) {
     val scope = rememberCoroutineScope()
-    val context = androidx.compose.ui.platform.LocalContext.current
 
     Card(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
@@ -235,25 +213,17 @@ fun ActionRow(action: ServiceItem, manager: ServiceManager, onRefresh: () -> Uni
     ) {
         Row(
             modifier = Modifier.padding(12.dp).clickable {
-                if (action.type == ServiceType.SAFE_STREAM) {
-                    val intent = Intent(context, SafeStreamActivity::class.java).apply {
-                        putExtra("url", action.openUrl)
-                    }
-                    context.startActivity(intent)
-                } else {
-                    scope.launch {
-                        manager.runAction(action)
-                        onRefresh()
-                    }
+                scope.launch {
+                    manager.runAction(action)
+                    onRefresh()
                 }
             },
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(if (action.type == ServiceType.SAFE_STREAM) "🛡️" else "⚡", fontSize = 18.sp)
+            Text("⚡", fontSize = 18.sp)
             Spacer(Modifier.width(12.dp))
             Text(action.label, color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            val btnText = if (action.type == ServiceType.SAFE_STREAM) "ÖPPNA" else "KÖR NU"
-            Text(btnText, color = Color(0xFF00AAFF), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            Text("KÖR NU", color = Color(0xFF00AAFF), fontWeight = FontWeight.Bold, fontSize = 12.sp)
         }
     }
 }

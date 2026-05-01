@@ -57,8 +57,7 @@ object TemplateRegistry {
         ServiceTemplate("elpris", "Elpris", ServiceType.HYBRID, 5100, ServiceGroup.PANELS, StatusCheckMode.PORT, null, true, true, "http://127.0.0.1:5100"),
         ServiceTemplate("fuel", "Fuel", ServiceType.WEB_PANEL, null, ServiceGroup.PANELS, StatusCheckMode.PROCESS, null, false, true), // Osäker -> null
         ServiceTemplate("runfull", "Kör alla", ServiceType.ACTION_SCRIPT, null, ServiceGroup.ACTIONS, StatusCheckMode.ACTION, null, false, false, canStop = false),
-        ServiceTemplate("stopall", "Stoppa alla", ServiceType.ACTION_SCRIPT, null, ServiceGroup.ACTIONS, StatusCheckMode.ACTION, null, false, false, canStop = false),
-        ServiceTemplate("playimdb", "Safe Stream: PlayIMDb", ServiceType.SAFE_STREAM, null, ServiceGroup.ACTIONS, StatusCheckMode.ACTION, null, false, true, "https://www.playimdb.com/title/tt0371746/")
+        ServiceTemplate("stopall", "Stoppa alla", ServiceType.ACTION_SCRIPT, null, ServiceGroup.ACTIONS, StatusCheckMode.ACTION, null, false, false, canStop = false)
     )
 
     fun find(name: String) = templates.find { it.name == name }
@@ -168,37 +167,13 @@ class ServiceManager(private val context: Context) {
     }
 
     fun getSavedServices(): List<ServiceItem> {
-        val saved = try {
+        return try {
             val json = prefs.getString("services_list", "[]")
             val type = object : TypeToken<List<ServiceItem>>() {}.type
             gson.fromJson<List<ServiceItem>>(json, type) ?: emptyList()
         } catch (_: Exception) {
             emptyList()
         }
-
-        // Se till att playimdb alltid finns med
-        if (saved.none { it.name == "playimdb" }) {
-            val template = TemplateRegistry.find("playimdb")
-            if (template != null) {
-                val item = ServiceItem(
-                    id = "playimdb",
-                    name = "playimdb",
-                    displayName = template.displayName,
-                    scriptPath = "internal://playimdb",
-                    type = template.type,
-                    group = template.group,
-                    checkMode = template.checkMode,
-                    canOpen = template.canOpen,
-                    openUrl = template.openUrl,
-                    canStart = template.canStart,
-                    canStop = template.canStop
-                )
-                val newList = saved + item
-                saveServices(newList)
-                return newList
-            }
-        }
-        return saved
     }
 
     fun saveServices(services: List<ServiceItem>) {
@@ -386,24 +361,6 @@ class ServiceManager(private val context: Context) {
 
     suspend fun runAction(item: ServiceItem): CommandResult {
         return executor.start(item)
-    }
-
-    suspend fun scanTermuxServices(): CommandResult = withContext(Dispatchers.IO) {
-        // Detta kommando letar efter .sh-filer i Termux hemkatalog
-        val scanCmd = "find /data/data/com.termux/files/home -maxdepth 3 -name \"*.sh\""
-        val process = Runtime.getRuntime().exec(arrayOf("pgrep", "-f", "com.termux")) // Bara för att kolla om Termux lever
-        
-        val intent = Intent("com.termux.RUN_COMMAND")
-        intent.setClassName("com.termux", "com.termux.app.RunCommandService")
-        intent.putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/find")
-        intent.putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf("/data/data/com.termux/files/home", "-maxdepth", "3", "-name", "*.sh"))
-        intent.putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
-        
-        // Eftersom vi inte kan fånga STDOUT direkt från RUN_COMMAND utan en callback-receiver
-        // så föreslår jag att vi istället lägger till en manuell "Scan"-knapp i UI
-        // som användaren kan köra.
-        
-        CommandResult(true, "Scanning triggad i Termux")
     }
 
     suspend fun stopService(item: ServiceItem): CommandResult {
