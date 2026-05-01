@@ -37,10 +37,7 @@ object ServiceWidget {
     private val monitorScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     fun updateAll(context: Context) {
-        val appContext = context.applicationContext
-        val manager = AppWidgetManager.getInstance(appContext)
-        val ids = WidgetUpdater.appWidgetIds(appContext)
-        update(appContext, manager, ids)
+        WidgetUpdater.refresh(context.applicationContext)
     }
 
     fun update(context: Context, manager: AppWidgetManager, appWidgetIds: IntArray) {
@@ -67,6 +64,7 @@ object ServiceWidget {
         val services = manager.getSavedServices()
             .filter { it.isEnabledOnWidget && (it.type == ServiceType.WEB_PANEL || it.type == ServiceType.HYBRID) }
         manager.checkAllStatuses(services)
+        WidgetStatsStore.save(appContext, manager.collectAllStats(services))
         updateAll(appContext)
     }
 
@@ -74,7 +72,6 @@ object ServiceWidget {
         val appContext = context.applicationContext
         val manager = ServiceManager(appContext)
         
-        // Handle special bulk actions
         if (serviceId == "runfull") {
             manager.startAllEligible()
             updateAll(appContext)
@@ -87,17 +84,10 @@ object ServiceWidget {
         }
 
         val service = manager.getSavedServices().find { it.id == serviceId } ?: return
-        
-        // 1. Re-check status before starting to ensure we have fresh state
         val current = manager.checkAndCacheStatus(service)
         val isRunning = current.status == RunStatus.RUNNING || current.status == RunStatus.DEGRADED
-        
-        // 2. Trigger the command
         val commandStarted = manager.togglePower(serviceId, isRunning)
-        
-        // 3. Update widget immediately to show "pending" or intermediate state
         updateAll(appContext)
-        
         if (!commandStarted) return
 
         monitorToggle(appContext, service.id, isRunning)
@@ -168,7 +158,7 @@ object ServiceWidget {
         views.setTextColor(R.id.widget_summary, colorForActive(activeCount, theme))
         views.setTextViewTextSize(R.id.widget_title, TypedValue.COMPLEX_UNIT_SP, settings.nameSize * 0.78f)
         views.setTextViewTextSize(R.id.widget_summary, TypedValue.COMPLEX_UNIT_SP, settings.metaSize)
-        views.setOnClickPendingIntent(R.id.widget_refresh, pending(context, ACTION_REFRESH, appWidgetId, null))
+        views.setOnClickPendingIntent(R.id.widget_refresh, WidgetIntents.refresh(context, ServiceWidgetReceiver::class.java, appWidgetId))
 
         val rowIds = rows()
         rowIds.forEachIndexed { index, row ->
@@ -224,30 +214,9 @@ object ServiceWidget {
         views.setTextViewTextSize(row.name, TypedValue.COMPLEX_UNIT_SP, settings.nameSize)
         views.setTextViewTextSize(row.meta, TypedValue.COMPLEX_UNIT_SP, settings.metaSize)
         views.setTextViewTextSize(row.action, TypedValue.COMPLEX_UNIT_SP, settings.metaSize * 0.95f * settings.actionScale)
-        views.setOnClickPendingIntent(row.action, if (canToggle) pending(context, ACTION_TOGGLE, appWidgetId, service.id) else pending(context, ACTION_REFRESH, appWidgetId, null))
-        val open = if (isRunning && service.canOpen && service.openUrl != null) openIntent(context, service) else null
-        views.setOnClickPendingIntent(row.container, open ?: pending(context, ACTION_REFRESH, appWidgetId, null))
-    }
-
-    private fun pending(context: Context, action: String, appWidgetId: Int, serviceId: String?): PendingIntent {
-        val intent = Intent(context, ServiceWidgetReceiver::class.java).apply {
-            this.action = action
-            putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
-            serviceId?.let { putExtra(EXTRA_SERVICE_ID, it) }
-        }
-        val requestCode = (action + appWidgetId + (serviceId ?: "")).hashCode()
-        return PendingIntent.getBroadcast(context, requestCode, intent, pendingFlags())
-    }
-
-    fun openIntent(context: Context, service: ServiceItem): PendingIntent? {
-        val url = service.openUrl ?: return null
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-        return PendingIntent.getActivity(context, service.id.hashCode(), intent, pendingFlags())
-    }
-
-    private fun pendingFlags(): Int {
-        val immutable = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
-        return PendingIntent.FLAG_UPDATE_CURRENT or immutable
+        views.setOnClickPendingIntent(row.action, if (canToggle) WidgetIntents.toggle(context, ServiceWidgetReceiver::class.java, appWidgetId, service.id) else WidgetIntents.refresh(context, ServiceWidgetReceiver::class.java, appWidgetId))
+        val open = if (isRunning && service.canOpen && service.openUrl != null) WidgetIntents.open(context, service) else null
+        views.setOnClickPendingIntent(row.container, open ?: WidgetIntents.refresh(context, ServiceWidgetReceiver::class.java, appWidgetId))
     }
 
     private fun rows() = listOf(
