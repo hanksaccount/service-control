@@ -1,0 +1,31 @@
+[
+  {
+    "id": "autosort",
+    "label": "AutoSort",
+    "scriptPath": "/root/projects/autosort/scripts/panel-start.sh",
+    "startCommand": "bash /root/projects/autosort/scripts/panel-start.sh",
+    "checkMode": "port",
+    "port": 5300,
+    "processMatch": "panel-start.sh|autosort",
+    "stopCommand": "fuser -k 5300/tcp"
+  },
+  {
+    "id": "elpris",
+    "label": "Elpris",
+    "scriptPath": "/root/Elpris_Backup_Fixed_20260321/server.py",
+    "startCommand": "python3 /root/Elpris_Backup_Fixed_20260321/server.py",
+    "checkMode": "port",
+    "port": 5100,
+    "processMatch": "Elpris_Backup_Fixed_20260321/server.py|:5100",
+    "stopCommand": "fuser -k 5100/tcp"
+  },
+  {
+    "id": "dashboard",
+    "label": "Dashboard",
+    "scriptPath": "/root/.shortcuts/dashboard.sh",
+    "startCommand": "bash /root/.shortcuts/dashboard.sh",
+    "checkMode": "process",
+    "processMatch": ".shortcuts/dashboard.sh",
+    "stopCommand": "pkill -f .shortcuts/dashboard.sh"
+  }
+]

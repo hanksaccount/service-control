@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Service Control</string>
+    <string name="widget_description">Kontrollerar lokala tjänster</string>
+</resources>
