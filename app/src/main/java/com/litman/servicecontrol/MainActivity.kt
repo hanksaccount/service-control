@@ -70,14 +70,20 @@ fun ServiceControlApp(manager: ServiceManager) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text("SERVICE CONTROL", fontSize = 20.sp, fontWeight = FontWeight.Black, color = Color.White)
-            IconButton(onClick = { 
-                scope.launch {
-                    // Om vi använder agent, hämta från agent. Annars kan vi inte scanna från appen direkt enkelt.
-                    // Men vi kan trigga en refresh av listan.
-                    refreshAll()
+            Row {
+                TextButton(onClick = { 
+                    scope.launch {
+                        // Denna triggar om-scanning av filer
+                        manager.runAction(ServiceItem("scan", "scan", scriptPath = ".shortcuts/scan.sh"))
+                        delay(1000)
+                        refreshAll()
+                    }
+                }) {
+                    Text("SCAN", color = Color(0xFF00AAFF), fontWeight = FontWeight.Bold)
                 }
-            }) {
-                Text("🔄", fontSize = 20.sp)
+                IconButton(onClick = { refreshAll() }) {
+                    Text("🔄", fontSize = 20.sp)
+                }
             }
         }
         ImpactHeader(

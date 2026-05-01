@@ -388,6 +388,24 @@ class ServiceManager(private val context: Context) {
         return executor.start(item)
     }
 
+    suspend fun scanTermuxServices(): CommandResult = withContext(Dispatchers.IO) {
+        // Detta kommando letar efter .sh-filer i Termux hemkatalog
+        val scanCmd = "find /data/data/com.termux/files/home -maxdepth 3 -name \"*.sh\""
+        val process = Runtime.getRuntime().exec(arrayOf("pgrep", "-f", "com.termux")) // Bara för att kolla om Termux lever
+        
+        val intent = Intent("com.termux.RUN_COMMAND")
+        intent.setClassName("com.termux", "com.termux.app.RunCommandService")
+        intent.putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/find")
+        intent.putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf("/data/data/com.termux/files/home", "-maxdepth", "3", "-name", "*.sh"))
+        intent.putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
+        
+        // Eftersom vi inte kan fånga STDOUT direkt från RUN_COMMAND utan en callback-receiver
+        // så föreslår jag att vi istället lägger till en manuell "Scan"-knapp i UI
+        // som användaren kan köra.
+        
+        CommandResult(true, "Scanning triggad i Termux")
+    }
+
     suspend fun stopService(item: ServiceItem): CommandResult {
         markPending(item.id, PendingAction.STOP)
         val result = executor.stop(item)

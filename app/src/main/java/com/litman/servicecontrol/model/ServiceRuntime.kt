@@ -21,8 +21,8 @@ enum class ServiceType {
     WEB_PANEL,
     HYBRID,
     ACTION_SCRIPT,
-    SAFE_STREAM,
-    UNKNOWN
+    UNKNOWN,
+    SAFE_STREAM
 }
 
 enum class ServiceGroup {
