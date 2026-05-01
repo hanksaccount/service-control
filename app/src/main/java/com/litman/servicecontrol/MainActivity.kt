@@ -21,7 +21,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 import android.content.Intent
-import com.litman.servicecontrol.SafeStreamActivity
 
 class MainActivity : ComponentActivity() {
     private lateinit var manager: ServiceManager
