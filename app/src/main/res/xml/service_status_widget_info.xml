@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:initialLayout="@layout/service_status_widget"
+    android:minWidth="180dp"
+    android:minHeight="72dp"
+    android:targetCellWidth="2"
+    android:targetCellHeight="1"
+    android:maxResizeWidth="320dp"
+    android:maxResizeHeight="120dp"
+    android:resizeMode="horizontal"
+    android:updatePeriodMillis="1800000"
+    android:widgetCategory="home_screen" />
