@@ -1,0 +1,218 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/monitor_widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="12dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/monitor_widget_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:textColor="#F4F7FA"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/monitor_widget_summary"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:textColor="#A8B3BD" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/monitor_widget_refresh"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:background="#151D24"
+            android:gravity="center"
+            android:text="R"
+            android:textColor="#A8B3BD"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginTop="8dp"
+        android:layout_marginBottom="8dp"
+        android:background="#22313A" />
+
+    <LinearLayout
+        android:id="@+id/monitor_row_1"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="8dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+        <FrameLayout
+            android:id="@+id/monitor_row_1_indicator"
+            android:layout_width="4dp"
+            android:layout_height="38dp"
+            android:layout_marginEnd="10dp" />
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+            <TextView
+                android:id="@+id/monitor_row_1_name"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:textColor="#F4F7FA"
+                android:textStyle="bold" />
+            <TextView
+                android:id="@+id/monitor_row_1_meta"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:textColor="#A8B3BD" />
+            <TextView
+                android:id="@+id/monitor_row_1_stats"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:textColor="#6B7884" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/monitor_row_2"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="8dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+        <FrameLayout
+            android:id="@+id/monitor_row_2_indicator"
+            android:layout_width="4dp"
+            android:layout_height="38dp"
+            android:layout_marginEnd="10dp" />
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+            <TextView
+                android:id="@+id/monitor_row_2_name"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:textColor="#F4F7FA"
+                android:textStyle="bold" />
+            <TextView
+                android:id="@+id/monitor_row_2_meta"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:textColor="#A8B3BD" />
+            <TextView
+                android:id="@+id/monitor_row_2_stats"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:textColor="#6B7884" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/monitor_row_3"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="8dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+        <FrameLayout
+            android:id="@+id/monitor_row_3_indicator"
+            android:layout_width="4dp"
+            android:layout_height="38dp"
+            android:layout_marginEnd="10dp" />
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+            <TextView
+                android:id="@+id/monitor_row_3_name"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:textColor="#F4F7FA"
+                android:textStyle="bold" />
+            <TextView
+                android:id="@+id/monitor_row_3_meta"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:textColor="#A8B3BD" />
+            <TextView
+                android:id="@+id/monitor_row_3_stats"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:textColor="#6B7884" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/monitor_row_4"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="8dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+        <FrameLayout
+            android:id="@+id/monitor_row_4_indicator"
+            android:layout_width="4dp"
+            android:layout_height="38dp"
+            android:layout_marginEnd="10dp" />
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+            <TextView
+                android:id="@+id/monitor_row_4_name"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:textColor="#F4F7FA"
+                android:textStyle="bold" />
+            <TextView
+                android:id="@+id/monitor_row_4_meta"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:textColor="#A8B3BD" />
+            <TextView
+                android:id="@+id/monitor_row_4_stats"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:textColor="#6B7884" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/monitor_widget_footer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:includeFontPadding="false"
+        android:textColor="#6B7884" />
+</LinearLayout>
