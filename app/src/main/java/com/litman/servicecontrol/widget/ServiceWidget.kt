@@ -21,6 +21,11 @@ import com.litman.servicecontrol.model.ServiceType
 import com.litman.servicecontrol.model.StatusCheckMode
 import com.litman.servicecontrol.model.Themes
 import com.litman.servicecontrol.model.WidgetSettings
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 private const val TAG = "ServiceCtrl"
@@ -29,6 +34,7 @@ object ServiceWidget {
     const val ACTION_REFRESH = "com.litman.servicecontrol.widget.REFRESH"
     const val ACTION_TOGGLE = "com.litman.servicecontrol.widget.TOGGLE"
     const val EXTRA_SERVICE_ID = "service_id"
+    private val monitorScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     fun updateAll(context: Context) {
         val appContext = context.applicationContext
@@ -93,15 +99,41 @@ object ServiceWidget {
         updateAll(appContext)
         
         if (!commandStarted) return
-        
-        // 4. Brief delay to allow the shell command to at least start/create flags
-        kotlinx.coroutines.delay(1200)
-        
-        // 5. Re-verify status and update cache (this will also sync our new stop flags)
-        manager.checkAndCacheStatus(service)
-        
-        // 6. Final UI refresh
-        updateAll(appContext)
+
+        monitorToggle(appContext, service.id, isRunning)
+    }
+
+    private fun monitorToggle(context: Context, serviceId: String, wasRunning: Boolean) {
+        val appContext = context.applicationContext
+        monitorScope.launch {
+            val manager = ServiceManager(appContext)
+            val startedAt = System.currentTimeMillis()
+            val timeoutMs = 45_000L
+
+            while (System.currentTimeMillis() - startedAt < timeoutMs) {
+                delay(1_000)
+                val service = manager.getSavedServices().find { it.id == serviceId } ?: break
+                val runtime = manager.checkAndCacheStatus(service)
+                val reachedTarget = if (wasRunning) {
+                    runtime.status == RunStatus.STOPPED
+                } else {
+                    runtime.status == RunStatus.RUNNING || runtime.status == RunStatus.DEGRADED
+                }
+
+                if (reachedTarget) {
+                    manager.clearPending(serviceId)
+                    updateAll(appContext)
+                    return@launch
+                }
+
+                updateAll(appContext)
+            }
+
+            val service = manager.getSavedServices().find { it.id == serviceId }
+            if (service != null) manager.checkAndCacheStatus(service)
+            manager.clearPending(serviceId)
+            updateAll(appContext)
+        }
     }
 
     private fun render(
@@ -264,7 +296,7 @@ object ServiceWidget {
         )
     }
 
-    private fun argb(alpha: Int, red: Int, green: Int, blue: Int): Int =
+    private fun argb(alpha: Int, red: Int, green: Int, blue: Int ): Int =
         Color.argb(alpha.coerceIn(0, 255), red, green, blue)
 
     private fun dp(context: Context, value: Float): Int =
