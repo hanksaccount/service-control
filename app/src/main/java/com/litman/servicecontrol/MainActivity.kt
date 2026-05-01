@@ -64,7 +64,22 @@ fun ServiceControlApp(manager: ServiceManager) {
     }
 
     Column(modifier = Modifier.padding(16.dp)) {
-        Text("SERVICE CONTROL", fontSize = 20.sp, fontWeight = FontWeight.Black, color = Color.White)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("SERVICE CONTROL", fontSize = 20.sp, fontWeight = FontWeight.Black, color = Color.White)
+            IconButton(onClick = { 
+                scope.launch {
+                    // Om vi använder agent, hämta från agent. Annars kan vi inte scanna från appen direkt enkelt.
+                    // Men vi kan trigga en refresh av listan.
+                    refreshAll()
+                }
+            }) {
+                Text("🔄", fontSize = 20.sp)
+            }
+        }
         ImpactHeader(
             services = services,
             runtimes = runtimes,

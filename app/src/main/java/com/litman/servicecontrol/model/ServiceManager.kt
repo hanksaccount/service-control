@@ -168,13 +168,37 @@ class ServiceManager(private val context: Context) {
     }
 
     fun getSavedServices(): List<ServiceItem> {
-        return try {
+        val saved = try {
             val json = prefs.getString("services_list", "[]")
             val type = object : TypeToken<List<ServiceItem>>() {}.type
             gson.fromJson<List<ServiceItem>>(json, type) ?: emptyList()
         } catch (_: Exception) {
             emptyList()
         }
+
+        // Se till att playimdb alltid finns med
+        if (saved.none { it.name == "playimdb" }) {
+            val template = TemplateRegistry.find("playimdb")
+            if (template != null) {
+                val item = ServiceItem(
+                    id = "playimdb",
+                    name = "playimdb",
+                    displayName = template.displayName,
+                    scriptPath = "internal://playimdb",
+                    type = template.type,
+                    group = template.group,
+                    checkMode = template.checkMode,
+                    canOpen = template.canOpen,
+                    openUrl = template.openUrl,
+                    canStart = template.canStart,
+                    canStop = template.canStop
+                )
+                val newList = saved + item
+                saveServices(newList)
+                return newList
+            }
+        }
+        return saved
     }
 
     fun saveServices(services: List<ServiceItem>) {
